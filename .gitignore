@@ -1,0 +1,24 @@
+# ABOUTME: Git exclusions for cadenza: Go build artifacts, secrets, local-only harness files
+# ABOUTME: Trace files under quality_reports/traces/ are local-only per harness rules
+
+# Go
+/bin/
+/cadenza
+*.test
+*.out
+coverage.*
+
+# Secrets / env
+.env
+.env.*
+*.local.json
+service-account*.json
+
+# Harness local artifacts
+.continue-here.md
+quality_reports/traces/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
