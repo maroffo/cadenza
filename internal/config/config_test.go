@@ -1,0 +1,101 @@
+// ABOUTME: Tests for env-based configuration: defaults, validation, fail-fast in prod.
+// ABOUTME: getenv is injected so tests never touch the real environment.
+
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func env(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func TestLoad_DevDefaults(t *testing.T) {
+	cfg, err := Load(env(map[string]string{}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Port != "8080" {
+		t.Errorf("Port = %q, want 8080", cfg.Port)
+	}
+	if cfg.Env != "dev" {
+		t.Errorf("Env = %q, want dev", cfg.Env)
+	}
+	if cfg.ICUAthleteID != "0" {
+		t.Errorf("ICUAthleteID = %q, want 0", cfg.ICUAthleteID)
+	}
+	if cfg.ICURatePerSec != 3 {
+		t.Errorf("ICURatePerSec = %v, want 3", cfg.ICURatePerSec)
+	}
+	if cfg.AthleteTZ != "Europe/Rome" {
+		t.Errorf("AthleteTZ = %q, want Europe/Rome", cfg.AthleteTZ)
+	}
+}
+
+func TestLoad_ExplicitOverrides(t *testing.T) {
+	cfg, err := Load(env(map[string]string{
+		"PORT":             "9000",
+		"ATHLETE_TZ":       "Europe/Madrid",
+		"ICU_ATHLETE_ID":   "i12345",
+		"ICU_RATE_PER_SEC": "5",
+	}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Port != "9000" {
+		t.Errorf("Port = %q, want 9000", cfg.Port)
+	}
+	if cfg.AthleteTZ != "Europe/Madrid" {
+		t.Errorf("AthleteTZ = %q, want Europe/Madrid", cfg.AthleteTZ)
+	}
+	if cfg.ICUAthleteID != "i12345" {
+		t.Errorf("ICUAthleteID = %q, want i12345", cfg.ICUAthleteID)
+	}
+	if cfg.ICURatePerSec != 5 {
+		t.Errorf("ICURatePerSec = %v, want 5", cfg.ICURatePerSec)
+	}
+}
+
+func TestLoad_InvalidEnvRejected(t *testing.T) {
+	_, err := Load(env(map[string]string{"ENV": "staging"}))
+	if err == nil || !strings.Contains(err.Error(), "ENV") {
+		t.Fatalf("err = %v, want ENV validation error", err)
+	}
+}
+
+func TestLoad_ProdRequirements(t *testing.T) {
+	t.Run("missing GCP_PROJECT rejected", func(t *testing.T) {
+		_, err := Load(env(map[string]string{"ENV": "prod", "ICU_API_KEY": "k"}))
+		if err == nil || !strings.Contains(err.Error(), "GCP_PROJECT") {
+			t.Fatalf("err = %v, want GCP_PROJECT required error", err)
+		}
+	})
+	t.Run("missing ICU_API_KEY rejected", func(t *testing.T) {
+		_, err := Load(env(map[string]string{"ENV": "prod", "GCP_PROJECT": "p"}))
+		if err == nil || !strings.Contains(err.Error(), "ICU_API_KEY") {
+			t.Fatalf("err = %v, want ICU_API_KEY required error", err)
+		}
+	})
+	t.Run("complete prod config accepted", func(t *testing.T) {
+		cfg, err := Load(env(map[string]string{"ENV": "prod", "GCP_PROJECT": "p", "ICU_API_KEY": "k"}))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.GCPProject != "p" || cfg.ICUAPIKey != "k" {
+			t.Errorf("cfg = %+v, want project p and key k", cfg)
+		}
+	})
+}
+
+func TestLoad_BadRateRejected(t *testing.T) {
+	for _, raw := range []string{"fast", "0", "-1"} {
+		t.Run(raw, func(t *testing.T) {
+			_, err := Load(env(map[string]string{"ICU_RATE_PER_SEC": raw}))
+			if err == nil || !strings.Contains(err.Error(), "ICU_RATE_PER_SEC") {
+				t.Fatalf("err = %v, want ICU_RATE_PER_SEC rejection for %q", err, raw)
+			}
+		})
+	}
+}

@@ -1,0 +1,232 @@
+// ABOUTME: Tests for typed intervals.icu models: null-vs-zero safety via pointer fields.
+// ABOUTME: A missing HRV must decode as nil, never as 0 (research pitfall 8).
+
+package icu
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestWellnessDecode_PresentFields(t *testing.T) {
+	raw := []byte(`{
+		"id": "2026-06-10",
+		"ctl": 41.3,
+		"atl": 47.9,
+		"rampRate": 3.2,
+		"hrv": 68.0,
+		"restingHR": 47,
+		"sleepSecs": 26100,
+		"sleepScore": 81.0,
+		"weight": 71.4,
+		"soreness": 2,
+		"fatigue": 3,
+		"stress": 1,
+		"readiness": 76.5
+	}`)
+	var w Wellness
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if w.ID != "2026-06-10" {
+		t.Errorf("ID = %q, want 2026-06-10", w.ID)
+	}
+	floatChecks := []struct {
+		name string
+		got  *float64
+		want float64
+	}{
+		{"ctl", w.CTL, 41.3},
+		{"atl", w.ATL, 47.9},
+		{"rampRate", w.RampRate, 3.2},
+		{"hrv", w.HRV, 68.0},
+		{"sleepScore", w.SleepScore, 81.0},
+		{"weight", w.Weight, 71.4},
+		{"readiness", w.Readiness, 76.5},
+	}
+	for _, c := range floatChecks {
+		if c.got == nil {
+			t.Errorf("%s = nil, want %v", c.name, c.want)
+		} else if *c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, *c.got, c.want)
+		}
+	}
+	intChecks := []struct {
+		name string
+		got  *int
+		want int
+	}{
+		{"restingHR", w.RestingHR, 47},
+		{"sleepSecs", w.SleepSecs, 26100},
+		{"soreness", w.Soreness, 2},
+		{"fatigue", w.Fatigue, 3},
+		{"stress", w.Stress, 1},
+	}
+	for _, c := range intChecks {
+		if c.got == nil {
+			t.Errorf("%s = nil, want %d", c.name, c.want)
+		} else if *c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, *c.got, c.want)
+		}
+	}
+}
+
+func TestWellnessDecode_AbsentFieldsAreNil(t *testing.T) {
+	// intervals.icu omits null fields entirely; absence must be nil, not zero.
+	raw := []byte(`{"id": "2026-06-09", "ctl": 41.0}`)
+	var w Wellness
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	nilFloats := map[string]*float64{
+		"hrv": w.HRV, "rampRate": w.RampRate, "sleepScore": w.SleepScore,
+		"weight": w.Weight, "readiness": w.Readiness, "atl": w.ATL,
+	}
+	for name, p := range nilFloats {
+		if p != nil {
+			t.Errorf("missing %s decoded as %v, want nil", name, *p)
+		}
+	}
+	nilInts := map[string]*int{
+		"restingHR": w.RestingHR, "sleepSecs": w.SleepSecs,
+		"soreness": w.Soreness, "fatigue": w.Fatigue, "stress": w.Stress,
+	}
+	for name, p := range nilInts {
+		if p != nil {
+			t.Errorf("missing %s decoded as %v, want nil", name, *p)
+		}
+	}
+}
+
+func TestWellnessDecode_ExplicitNullVsZero(t *testing.T) {
+	// Defensive: an explicit JSON null must stay nil, an explicit 0 must
+	// survive as a pointer to 0. This is the exact contract the verdict
+	// engine relies on to tell "not synced" from "measured zero".
+	raw := []byte(`{"id": "2026-06-08", "hrv": null, "soreness": 0}`)
+	var w Wellness
+	if err := json.Unmarshal(raw, &w); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if w.HRV != nil {
+		t.Errorf("explicit null hrv decoded as %v, want nil", *w.HRV)
+	}
+	if w.Soreness == nil {
+		t.Error("explicit 0 soreness decoded as nil, want pointer to 0")
+	} else if *w.Soreness != 0 {
+		t.Errorf("soreness = %d, want 0", *w.Soreness)
+	}
+}
+
+func TestDecodeWellnessRange(t *testing.T) {
+	raw := json.RawMessage(`[
+		{"id": "2026-06-09", "ctl": 41.0, "hrv": 65.5},
+		{"id": "2026-06-10", "ctl": 41.3}
+	]`)
+	days, err := DecodeWellnessRange(raw)
+	if err != nil {
+		t.Fatalf("DecodeWellnessRange: %v", err)
+	}
+	if len(days) != 2 {
+		t.Fatalf("len = %d, want 2", len(days))
+	}
+	if days[0].HRV == nil || *days[0].HRV != 65.5 {
+		t.Errorf("day0 hrv = %v, want 65.5", days[0].HRV)
+	}
+	if days[1].HRV != nil {
+		t.Errorf("day1 hrv = %v, want nil", *days[1].HRV)
+	}
+}
+
+func TestDecodeWellnessRange_Malformed(t *testing.T) {
+	cases := map[string]string{
+		"object not array": `{"not":"an array"}`,
+		"truncated":        `[{"id":"2026-06-09"`,
+		"wrong field type": `[{"id":"2026-06-09","ctl":"high"}]`,
+		"wrong element":    `["just-a-string"]`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeWellnessRange(json.RawMessage(payload)); err == nil {
+				t.Errorf("DecodeWellnessRange(%s) = nil error, want decode failure", payload)
+			}
+		})
+	}
+}
+
+func TestEventDecode(t *testing.T) {
+	raw := []byte(`{
+		"id": 12345,
+		"start_date_local": "2026-06-12T00:00:00",
+		"category": "WORKOUT",
+		"name": "Easy run",
+		"description": "- 40m Z2",
+		"external_id": "cadenza-2026-06-12-abc123"
+	}`)
+	var e Event
+	if err := json.Unmarshal(raw, &e); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if e.ID != 12345 {
+		t.Errorf("ID = %d, want 12345", e.ID)
+	}
+	if e.Category != "WORKOUT" {
+		t.Errorf("Category = %q, want WORKOUT", e.Category)
+	}
+	if e.Name == nil || *e.Name != "Easy run" {
+		t.Errorf("Name = %v, want 'Easy run'", e.Name)
+	}
+	if e.Description == nil || *e.Description != "- 40m Z2" {
+		t.Errorf("Description = %v, want '- 40m Z2'", e.Description)
+	}
+	if e.ExternalID == nil || *e.ExternalID != "cadenza-2026-06-12-abc123" {
+		t.Errorf("ExternalID = %v", e.ExternalID)
+	}
+}
+
+func TestDecodeEvents(t *testing.T) {
+	raw := json.RawMessage(`[
+		{
+			"id": 1,
+			"start_date_local": "2026-06-12T00:00:00",
+			"category": "WORKOUT",
+			"name": "Intervals",
+			"workout_doc": {"steps": [{"duration": 600}]}
+		},
+		{
+			"id": 2,
+			"start_date_local": "2026-06-13T00:00:00",
+			"category": "NOTE"
+		}
+	]`)
+	events, err := DecodeEvents(raw)
+	if err != nil {
+		t.Fatalf("DecodeEvents: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("len = %d, want 2", len(events))
+	}
+	if events[0].WorkoutDoc == nil {
+		t.Error("workout_doc = nil, want raw JSON passthrough")
+	} else if !json.Valid(events[0].WorkoutDoc) {
+		t.Errorf("workout_doc not valid JSON: %s", events[0].WorkoutDoc)
+	}
+	if events[1].Name != nil || events[1].Description != nil ||
+		events[1].ExternalID != nil || events[1].WorkoutDoc != nil {
+		t.Errorf("absent optionals must be nil: %+v", events[1])
+	}
+}
+
+func TestDecodeEvents_Malformed(t *testing.T) {
+	cases := map[string]string{
+		"object not array": `{"id": 1}`,
+		"wrong id type":    `[{"id": "abc"}]`,
+		"truncated":        `[{"id": 1`,
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := DecodeEvents(json.RawMessage(payload)); err == nil {
+				t.Errorf("DecodeEvents(%s) = nil error, want decode failure", payload)
+			}
+		})
+	}
+}
