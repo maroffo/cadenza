@@ -2,15 +2,23 @@
 # ABOUTME: Go targets activate once go.mod exists; consumed by pre-commit hook, CI, and review preflight
 
 GOLANGCI_LINT ?= golangci-lint
-GOVULNCHECK ?= govulncheck
+# Fall back to GOPATH/bin so hooks and CI shells without it on PATH still gate.
+GOVULNCHECK ?= $(shell command -v govulncheck 2>/dev/null || echo "$$(go env GOPATH)/bin/govulncheck")
 
 # The repo bootstraps docs-first and the gate must stay green at every
 # commit, so Go targets are conditional on go.mod existing.
 GO_READY := $(wildcard go.mod)
 
-.PHONY: check lint vet fmt-check vuln test test-e2e
+.PHONY: check lint vet fmt-check vuln test test-e2e emulator
 
 check: lint vet fmt-check vuln test
+
+# Firestore emulator via Docker (the gcloud component needs a Java JRE; Docker doesn't).
+# Tests pick it up with FIRESTORE_EMULATOR_HOST=localhost:8090.
+emulator:
+	docker run --rm --name cadenza-firestore-emu -p 8090:8090 \
+		gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+		gcloud emulators firestore start --host-port=0.0.0.0:8090
 
 ifneq ($(GO_READY),)
 
