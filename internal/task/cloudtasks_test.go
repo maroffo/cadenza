@@ -4,20 +4,26 @@
 package task
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	queuePath = "projects/p/locations/europe-west1/queues/cadenza-exec"
 	targetURL = "https://cadenza-x.run.app/internal/execute"
+	audience  = "https://cadenza-x.run.app"
 	invokerSA = "cadenza-invoker@p.iam.gserviceaccount.com"
 )
 
 func TestBuildTaskRequest(t *testing.T) {
 	e := Envelope{V: 1, Type: TypeTelegramUpdate, ID: "tg-update-777", Payload: json.RawMessage(`{"update_id":777}`)}
-	req, err := BuildTaskRequest(queuePath, targetURL, invokerSA, e)
+	req, err := BuildTaskRequest(queuePath, targetURL, audience, invokerSA, e)
 	if err != nil {
 		t.Fatalf("BuildTaskRequest: %v", err)
 	}
@@ -46,7 +52,7 @@ func TestBuildTaskRequest(t *testing.T) {
 
 func TestBuildTaskRequest_SanitizesName(t *testing.T) {
 	e := Envelope{V: 1, Type: TypeTelegramUpdate, ID: "send-morning:2026-06-10"}
-	req, err := BuildTaskRequest(queuePath, targetURL, invokerSA, e)
+	req, err := BuildTaskRequest(queuePath, targetURL, audience, invokerSA, e)
 	if err != nil {
 		t.Fatalf("BuildTaskRequest: %v", err)
 	}
@@ -58,10 +64,54 @@ func TestBuildTaskRequest_SanitizesName(t *testing.T) {
 
 func TestBuildTaskRequest_RejectsInvalid(t *testing.T) {
 	valid := Envelope{V: 1, Type: TypeMorningCheck, ID: "x"}
-	if _, err := BuildTaskRequest("", targetURL, invokerSA, valid); err == nil {
+	if _, err := BuildTaskRequest("", targetURL, audience, invokerSA, valid); err == nil {
 		t.Error("empty queuePath accepted")
 	}
-	if _, err := BuildTaskRequest(queuePath, targetURL, invokerSA, Envelope{}); err == nil {
+	if _, err := BuildTaskRequest(queuePath, targetURL, audience, invokerSA, Envelope{}); err == nil {
 		t.Error("invalid envelope accepted")
+	}
+}
+
+func TestTaskName_InjectiveAfterSanitization(t *testing.T) {
+	// "a:b" and "a-b" must NOT collide: a collision is silently swallowed
+	// as a named-task duplicate and the second envelope is lost.
+	a := Envelope{V: 1, Type: TypeMorningCheck, ID: "send-morning:2026-06-10"}
+	b := Envelope{V: 1, Type: TypeMorningCheck, ID: "send-morning-2026-06-10"}
+	ra, err := BuildTaskRequest(queuePath, targetURL, audience, invokerSA, a)
+	if err != nil {
+		t.Fatalf("a: %v", err)
+	}
+	rb, err := BuildTaskRequest(queuePath, targetURL, audience, invokerSA, b)
+	if err != nil {
+		t.Fatalf("b: %v", err)
+	}
+	if ra.Task.Name == rb.Task.Name {
+		t.Fatalf("distinct ids collided on task name %q", ra.Task.Name)
+	}
+}
+
+func TestEnqueue_AlreadyExistsIsSuccess(t *testing.T) {
+	c := &CloudTasks{
+		QueuePath: queuePath, TargetURL: targetURL, Audience: audience, InvokerSA: invokerSA,
+		createFn: func(context.Context, *cloudtaskspb.CreateTaskRequest) error {
+			return status.Error(codes.AlreadyExists, "task exists")
+		},
+	}
+	e := Envelope{V: 1, Type: TypeTelegramUpdate, ID: "tg-update-1"}
+	if err := c.Enqueue(context.Background(), e); err != nil {
+		t.Fatalf("AlreadyExists must be success (named-task dedup), got %v", err)
+	}
+}
+
+func TestEnqueue_OtherErrorsWrapped(t *testing.T) {
+	c := &CloudTasks{
+		QueuePath: queuePath, TargetURL: targetURL, Audience: audience, InvokerSA: invokerSA,
+		createFn: func(context.Context, *cloudtaskspb.CreateTaskRequest) error {
+			return status.Error(codes.Unavailable, "queue down")
+		},
+	}
+	e := Envelope{V: 1, Type: TypeTelegramUpdate, ID: "tg-update-2"}
+	if err := c.Enqueue(context.Background(), e); err == nil {
+		t.Fatal("transient queue error swallowed")
 	}
 }

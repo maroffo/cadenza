@@ -6,7 +6,6 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -78,7 +77,7 @@ func (h *Webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	env := task.Envelope{
 		V:       task.EnvelopeVersion,
 		Type:    task.TypeTelegramUpdate,
-		ID:      fmt.Sprintf("tg-update-%d", u.UpdateID),
+		ID:      task.TelegramUpdateID(u.UpdateID),
 		Payload: body,
 	}
 	if err := h.Enqueue.Enqueue(r.Context(), env); err != nil {

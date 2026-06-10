@@ -28,7 +28,7 @@ func Poll(ctx context.Context, token string, enq task.Enqueuer) error {
 		env := task.Envelope{
 			V:       task.EnvelopeVersion,
 			Type:    task.TypeTelegramUpdate,
-			ID:      fmt.Sprintf("tg-update-%d", update.ID),
+			ID:      task.TelegramUpdateID(update.ID),
 			Payload: raw,
 		}
 		if err := enq.Enqueue(hctx, env); err != nil {

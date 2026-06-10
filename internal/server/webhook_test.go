@@ -129,3 +129,35 @@ func TestWebhook_EnqueueFailureIs500ForRedelivery(t *testing.T) {
 		t.Fatalf("code = %d, want 500 (Telegram must redeliver later)", rec.Code)
 	}
 }
+
+func TestWebhook_OversizedAndEmptyBodiesDropped(t *testing.T) {
+	enq := &captureEnqueuer{}
+	h := newWebhook(enq)
+
+	big := `{"update_id":1,"message":{"text":"` + strings.Repeat("a", maxUpdateBytes) + `"}}`
+	for name, body := range map[string]string{"oversized": big, "empty": ""} {
+		if rec := postUpdate(t, h, "s3cret", body); rec.Code != http.StatusOK {
+			t.Errorf("%s: code = %d, want 200 (drop, no 24h retries)", name, rec.Code)
+		}
+	}
+	if len(enq.envs) != 0 {
+		t.Fatal("bad bodies enqueued")
+	}
+}
+
+func TestWebhook_MissingSecretHeaderIs403(t *testing.T) {
+	enq := &captureEnqueuer{}
+	h := newWebhook(enq)
+	if rec := postUpdate(t, h, "", validUpdate); rec.Code != http.StatusForbidden {
+		t.Fatalf("code = %d, want 403", rec.Code)
+	}
+}
+
+func TestWebhookRoute_GETIs405(t *testing.T) {
+	h := New(Deps{Webhook: newWebhook(&captureEnqueuer{})})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/telegram/webhook", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("code = %d, want 405 (POST-only route)", rec.Code)
+	}
+}

@@ -89,6 +89,7 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 			Client:    tasksClient,
 			QueuePath: cfg.TasksQueuePath,
 			TargetURL: cfg.ExecutorAudience + "/internal/execute",
+			Audience:  cfg.ExecutorAudience,
 			InvokerSA: cfg.InvokerEmail,
 		}
 	}
@@ -172,7 +173,7 @@ func buildJobs(ctx context.Context, cfg *config.Config) (job.Deps, error) {
 		Dedup:         store.NewDedup(fsClient),
 		Chats:         store.NewChats(fsClient),
 		Out:           sender,
-		Morning:       morning,
+		Status:        morning,
 	}
 	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message}, nil
 }

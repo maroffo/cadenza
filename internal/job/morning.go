@@ -61,7 +61,7 @@ func (m Morning) Run(ctx context.Context) error {
 		return nil
 	}
 
-	body, v, err := m.Compose(ctx)
+	body, v, err := m.composeFor(ctx, today)
 	if err != nil {
 		// No degraded message here: the caller's retry policy gets its shot
 		// first; the watchdog covers persistent absence (decision 16).
@@ -82,14 +82,22 @@ func (m Morning) Run(ctx context.Context) error {
 // Compose builds the morning body and verdict without side effects. The
 // morning job sends and marks; /status (M3) sends without marking.
 func (m Morning) Compose(ctx context.Context) (string, verdict.Verdict, error) {
-	today := m.Now().In(m.TZ).Format(dateLayout)
+	return m.composeFor(ctx, m.Now().In(m.TZ).Format(dateLayout))
+}
 
+// composeFor takes the date from the caller so Run marks exactly the date
+// the message describes, even across a midnight boundary.
+func (m Morning) composeFor(ctx context.Context, today string) (string, verdict.Verdict, error) {
 	baselines, rampCap, err := m.Profiles.Profile(ctx)
 	if err != nil {
 		return "", verdict.Verdict{}, fmt.Errorf("morning: profile: %w", err)
 	}
 
-	oldest := m.Now().In(m.TZ).AddDate(0, 0, -7).Format(dateLayout)
+	day, err := time.ParseInLocation(dateLayout, today, m.TZ)
+	if err != nil {
+		return "", verdict.Verdict{}, fmt.Errorf("morning: bad date %q: %w", today, err)
+	}
+	oldest := day.AddDate(0, 0, -7).Format(dateLayout)
 	days, err := m.Wellness.WellnessRange(ctx, oldest, today)
 	if err != nil {
 		return "", verdict.Verdict{}, fmt.Errorf("morning: wellness fetch: %w", err)
