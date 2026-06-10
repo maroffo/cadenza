@@ -15,7 +15,7 @@ import (
 )
 
 func TestBoot_HealthzOverHTTP(t *testing.T) {
-	ts := httptest.NewServer(server.New())
+	ts := httptest.NewServer(server.New(server.Deps{}))
 	defer ts.Close()
 
 	resp, err := http.Get(ts.URL + "/healthz")

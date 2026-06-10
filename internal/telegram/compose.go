@@ -84,6 +84,15 @@ func DegradedLLMDown() string {
 	return "ℹ️ <i>Coach offline (errore API, riproverò): qui sotto i numeri e il verdetto deterministico.</i>"
 }
 
+// WatchdogMissedMorning: the 07:00 check never completed. Sent by the
+// watchdog job alongside the ERROR log that triggers the email alert.
+func WatchdogMissedMorning() string {
+	return "⚠️ <b>Check mattutino mancato</b>\n" +
+		"Il controllo delle 07:00 non è andato a buon fine (problema tecnico, " +
+		"sto già suonando l'allarme via email).\n" +
+		"Nel dubbio: vai a sensazione e resta facile, Z2, niente qualità."
+}
+
 // SplitMessage breaks a message into chunks within the Telegram limit.
 // It prefers paragraph boundaries (\n\n), then line boundaries, then spaces,
 // and as a last resort backtracks so a cut never lands inside an HTML tag:

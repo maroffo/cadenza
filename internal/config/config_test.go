@@ -65,26 +65,50 @@ func TestLoad_InvalidEnvRejected(t *testing.T) {
 	}
 }
 
+func completeProdEnv() map[string]string {
+	return map[string]string{
+		"ENV":                "prod",
+		"GCP_PROJECT":        "p",
+		"ICU_API_KEY":        "k",
+		"TELEGRAM_BOT_TOKEN": "t",
+		"TELEGRAM_CHAT_ID":   "424242",
+		"EXECUTOR_AUDIENCE":  "https://cadenza.example.run.app",
+		"INVOKER_EMAIL":      "cadenza-invoker@p.iam.gserviceaccount.com",
+	}
+}
+
 func TestLoad_ProdRequirements(t *testing.T) {
-	t.Run("missing GCP_PROJECT rejected", func(t *testing.T) {
-		_, err := Load(env(map[string]string{"ENV": "prod", "ICU_API_KEY": "k"}))
-		if err == nil || !strings.Contains(err.Error(), "GCP_PROJECT") {
-			t.Fatalf("err = %v, want GCP_PROJECT required error", err)
-		}
-	})
-	t.Run("missing ICU_API_KEY rejected", func(t *testing.T) {
-		_, err := Load(env(map[string]string{"ENV": "prod", "GCP_PROJECT": "p"}))
-		if err == nil || !strings.Contains(err.Error(), "ICU_API_KEY") {
-			t.Fatalf("err = %v, want ICU_API_KEY required error", err)
-		}
-	})
+	for _, missing := range []string{
+		"GCP_PROJECT", "ICU_API_KEY", "TELEGRAM_BOT_TOKEN",
+		"TELEGRAM_CHAT_ID", "EXECUTOR_AUDIENCE", "INVOKER_EMAIL",
+	} {
+		t.Run("missing "+missing+" rejected", func(t *testing.T) {
+			m := completeProdEnv()
+			delete(m, missing)
+			_, err := Load(env(m))
+			if err == nil || !strings.Contains(err.Error(), missing) {
+				t.Fatalf("err = %v, want %s required error", err, missing)
+			}
+		})
+	}
 	t.Run("complete prod config accepted", func(t *testing.T) {
-		cfg, err := Load(env(map[string]string{"ENV": "prod", "GCP_PROJECT": "p", "ICU_API_KEY": "k"}))
+		cfg, err := Load(env(completeProdEnv()))
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
 		if cfg.GCPProject != "p" || cfg.ICUAPIKey != "k" {
 			t.Errorf("cfg = %+v, want project p and key k", cfg)
+		}
+		if cfg.TelegramChatID != 424242 {
+			t.Errorf("TelegramChatID = %d, want 424242", cfg.TelegramChatID)
+		}
+	})
+	t.Run("bad chat id rejected", func(t *testing.T) {
+		m := completeProdEnv()
+		m["TELEGRAM_CHAT_ID"] = "not-a-number"
+		_, err := Load(env(m))
+		if err == nil || !strings.Contains(err.Error(), "TELEGRAM_CHAT_ID") {
+			t.Fatalf("err = %v, want TELEGRAM_CHAT_ID parse error", err)
 		}
 	})
 }

@@ -13,11 +13,18 @@ type Config struct {
 	Env        string // "dev" or "prod"
 	GCPProject string
 
-	// intervals.icu fields are validated here but wired to the client in M2.
 	ICUAPIKey     string
 	ICUAthleteID  string  // "0" = the athlete owning the API key (intervals.icu convention)
 	ICURatePerSec float64 // overrides the client default only when ICU_RATE_PER_SEC is set
 	AthleteTZ     string
+
+	TelegramBotToken string
+	TelegramChatID   int64 // manual until M3 persists it at /start
+
+	// Executor OIDC: audience is the service URL without query params,
+	// invoker is the cadenza-invoker@ service account email.
+	ExecutorAudience string
+	InvokerEmail     string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -41,15 +48,35 @@ func Load(getenv func(string) string) (*Config, error) {
 		cfg.ICURatePerSec = rate
 	}
 
+	if raw := getenv("TELEGRAM_CHAT_ID"); raw != "" {
+		id, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("TELEGRAM_CHAT_ID: invalid value %q", raw)
+		}
+		cfg.TelegramChatID = id
+	}
+	cfg.TelegramBotToken = getenv("TELEGRAM_BOT_TOKEN")
+	cfg.ExecutorAudience = getenv("EXECUTOR_AUDIENCE")
+	cfg.InvokerEmail = getenv("INVOKER_EMAIL")
+
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)
 	}
 	if cfg.Env == "prod" {
-		if cfg.GCPProject == "" {
-			return nil, fmt.Errorf("GCP_PROJECT is required in prod")
+		required := map[string]string{
+			"GCP_PROJECT":        cfg.GCPProject,
+			"ICU_API_KEY":        cfg.ICUAPIKey,
+			"TELEGRAM_BOT_TOKEN": cfg.TelegramBotToken,
+			"EXECUTOR_AUDIENCE":  cfg.ExecutorAudience,
+			"INVOKER_EMAIL":      cfg.InvokerEmail,
 		}
-		if cfg.ICUAPIKey == "" {
-			return nil, fmt.Errorf("ICU_API_KEY is required in prod")
+		for name, v := range required {
+			if v == "" {
+				return nil, fmt.Errorf("%s is required in prod", name)
+			}
+		}
+		if cfg.TelegramChatID == 0 {
+			return nil, fmt.Errorf("TELEGRAM_CHAT_ID is required in prod")
 		}
 	}
 	return cfg, nil

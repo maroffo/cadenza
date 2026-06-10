@@ -1,0 +1,77 @@
+// ABOUTME: Emulator tests for the profile and runs repositories.
+// ABOUTME: Skips without FIRESTORE_EMULATOR_HOST; REQUIRE_EMULATOR=1 turns skips fatal.
+
+package store
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/maroffo/cadenza/internal/verdict"
+)
+
+func TestProfiles_SeedAndGetRoundTrip(t *testing.T) {
+	client := emulatorClient(t)
+	p := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	want := verdict.Baselines{HRVMean: 68, HRVSD: 6, RestingHR: 47}
+	if err := p.Seed(ctx, want, 4.0); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	got, rampCap, err := p.Profile(ctx)
+	if err != nil {
+		t.Fatalf("Profile: %v", err)
+	}
+	if got != want {
+		t.Errorf("baselines = %+v, want %+v", got, want)
+	}
+	if rampCap != 4.0 {
+		t.Errorf("rampCap = %v, want 4.0", rampCap)
+	}
+}
+
+func TestProfiles_ImplausibleBaselinesRejected(t *testing.T) {
+	client := emulatorClient(t)
+	p := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := p.Seed(ctx, verdict.Baselines{}, 4.0); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if _, _, err := p.Profile(ctx); err == nil {
+		t.Fatal("zero baselines accepted; coaching on invented numbers must fail loudly")
+	}
+}
+
+func TestRuns_MorningLifecycle(t *testing.T) {
+	client := emulatorClient(t)
+	r := NewRuns(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Opaque unique id: the repo treats dates as strings, and uniqueness
+	// keeps reruns against a long-lived emulator instance independent.
+	date := fmt.Sprintf("2099-test-%d", time.Now().UnixNano())
+
+	done, err := r.MorningCompleted(ctx, date)
+	if err != nil {
+		t.Fatalf("MorningCompleted: %v", err)
+	}
+	if done {
+		t.Fatal("fresh date reports completed")
+	}
+	if err := r.MarkMorningCompleted(ctx, date, "GO"); err != nil {
+		t.Fatalf("MarkMorningCompleted: %v", err)
+	}
+	done, err = r.MorningCompleted(ctx, date)
+	if err != nil {
+		t.Fatalf("MorningCompleted after mark: %v", err)
+	}
+	if !done {
+		t.Fatal("marked date reports not completed")
+	}
+}

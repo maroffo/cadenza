@@ -1,0 +1,146 @@
+// ABOUTME: The deterministic morning check: wellness -> verdict -> Telegram, no LLM in M2.
+// ABOUTME: Idempotent per date via the runs store; icu failures surface as errors so callers retry.
+
+package job
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/telegram"
+	"github.com/maroffo/cadenza/internal/verdict"
+)
+
+// WellnessSource provides typed wellness days for a date range (inclusive).
+type WellnessSource interface {
+	WellnessRange(ctx context.Context, oldest, newest string) ([]icu.Wellness, error)
+}
+
+// ProfileSource provides the athlete's baselines and tunable ramp cap.
+type ProfileSource interface {
+	Profile(ctx context.Context) (verdict.Baselines, float64, error)
+}
+
+// Messenger delivers coaching messages; satisfied by telegram.Sender.
+type Messenger interface {
+	SendWithVerdict(ctx context.Context, body string, v verdict.Verdict) error
+	Send(ctx context.Context, body string) error
+}
+
+// RunStore tracks per-date job completion for idempotency.
+type RunStore interface {
+	MorningCompleted(ctx context.Context, date string) (bool, error)
+	MarkMorningCompleted(ctx context.Context, date, status string) error
+}
+
+type Morning struct {
+	Wellness WellnessSource
+	Profiles ProfileSource
+	Out      Messenger
+	Runs     RunStore
+	Now      func() time.Time
+	TZ       *time.Location
+}
+
+const dateLayout = "2006-01-02"
+
+func (m Morning) Run(ctx context.Context) error {
+	today := m.Now().In(m.TZ).Format(dateLayout)
+
+	done, err := m.Runs.MorningCompleted(ctx, today)
+	if err != nil {
+		return fmt.Errorf("morning: completion check: %w", err)
+	}
+	if done {
+		slog.Info("morning: already completed, no-op", "date", today)
+		return nil
+	}
+
+	baselines, rampCap, err := m.Profiles.Profile(ctx)
+	if err != nil {
+		return fmt.Errorf("morning: profile: %w", err)
+	}
+
+	oldest := m.Now().In(m.TZ).AddDate(0, 0, -7).Format(dateLayout)
+	days, err := m.Wellness.WellnessRange(ctx, oldest, today)
+	if err != nil {
+		// No degraded message here: the caller's retry policy gets its shot
+		// first; the watchdog covers persistent absence (decision 16).
+		return fmt.Errorf("morning: wellness fetch: %w", err)
+	}
+
+	data, in := assemble(today, days, baselines, rampCap)
+	v := verdict.Compute(in, verdict.DefaultRules())
+
+	if err := m.Out.SendWithVerdict(ctx, telegram.MorningBody(data), v); err != nil {
+		return fmt.Errorf("morning: send: %w", err)
+	}
+	if err := m.Runs.MarkMorningCompleted(ctx, today, string(v.Kind)); err != nil {
+		// The message went out; a retry will resend at most once (accepted).
+		return fmt.Errorf("morning: mark completed: %w", err)
+	}
+	return nil
+}
+
+// assemble maps wellness days onto the message data and the verdict input.
+// If today's record is absent, the freshest older day is shown, labeled
+// stale, and the verdict input keeps today empty so missing-data rules fire.
+func assemble(today string, days []icu.Wellness, baselines verdict.Baselines, rampCap float64) (telegram.MorningData, verdict.Input) {
+	var todayW *icu.Wellness
+	var window []verdict.Day
+	var latest *icu.Wellness
+
+	for i := range days {
+		d := &days[i]
+		switch {
+		case d.ID == today:
+			todayW = d
+		case d.ID < today:
+			window = append(window, toVerdictDay(*d))
+			if latest == nil || d.ID > latest.ID {
+				latest = d
+			}
+		}
+	}
+
+	in := verdict.Input{
+		Today:     verdict.Day{Date: today},
+		Window:    window,
+		Baselines: baselines,
+		RampCap:   rampCap,
+	}
+	data := telegram.MorningData{Date: today}
+
+	display := todayW
+	if todayW != nil {
+		in.Today = toVerdictDay(*todayW)
+	} else if latest != nil {
+		display = latest
+		data.Stale = true
+		data.StaleAsOf = latest.ID
+	}
+	if display != nil {
+		data.HRV = display.HRV
+		data.RestingHR = display.RestingHR
+		data.SleepSecs = display.SleepSecs
+		data.CTL = display.CTL
+		data.ATL = display.ATL
+		data.RampRate = display.RampRate
+	}
+	return data, in
+}
+
+func toVerdictDay(w icu.Wellness) verdict.Day {
+	return verdict.Day{
+		Date:      w.ID,
+		HRV:       w.HRV,
+		RestingHR: w.RestingHR,
+		SleepSecs: w.SleepSecs,
+		RampRate:  w.RampRate,
+		CTL:       w.CTL,
+		ATL:       w.ATL,
+	}
+}
