@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,6 +32,14 @@ type Executor struct {
 const maxEnvelopeBytes = 1 << 20
 
 func (e *Executor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Fail closed: idtoken.Validate skips the audience check entirely when
+	// audience is empty, so a misconfigured deploy must refuse to serve
+	// rather than silently accept tokens minted for any audience.
+	if e.Audience == "" || e.InvokerEmail == "" {
+		slog.Error("executor: refusing to serve without audience/invoker configuration")
+		http.Error(w, "executor not configured", http.StatusServiceUnavailable)
+		return
+	}
 	token, ok := bearerToken(r)
 	if !ok {
 		http.Error(w, "missing bearer token", http.StatusUnauthorized)
@@ -64,6 +73,12 @@ func (e *Executor) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := e.Dispatch(r.Context(), env); err != nil {
+		if errors.Is(err, task.ErrPoison) {
+			// Permanent failure: drop with 200 so retries are not burned.
+			slog.Error("executor: poison task dropped", "type", env.Type, "id", env.ID, "err", err)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
 		// Transient failure: non-2xx makes Cloud Tasks retry within its
 		// bounded policy (max-attempts caps the blast radius).
 		slog.Error("executor: dispatch failed", "type", env.Type, "id", env.ID, "err", err)

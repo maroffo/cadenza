@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/maroffo/cadenza/internal/icu"
@@ -79,7 +81,8 @@ func (m Morning) Run(ctx context.Context) error {
 		return fmt.Errorf("morning: send: %w", err)
 	}
 	if err := m.Runs.MarkMorningCompleted(ctx, today, string(v.Kind)); err != nil {
-		// The message went out; a retry will resend at most once (accepted).
+		// The message went out; each retry resends until the mark sticks,
+		// bounded by the caller's max-attempts (accepted trade-off).
 		return fmt.Errorf("morning: mark completed: %w", err)
 	}
 	return nil
@@ -88,23 +91,31 @@ func (m Morning) Run(ctx context.Context) error {
 // assemble maps wellness days onto the message data and the verdict input.
 // If today's record is absent, the freshest older day is shown, labeled
 // stale, and the verdict input keeps today empty so missing-data rules fire.
+// The window is sorted and deduplicated here: the consecutive-low-HRV SKIP
+// escalation in verdict.Compute assumes chronological order, and the API's
+// response ordering is not a documented contract we may lean on.
 func assemble(today string, days []icu.Wellness, baselines verdict.Baselines, rampCap float64) (telegram.MorningData, verdict.Input) {
 	var todayW *icu.Wellness
 	var window []verdict.Day
 	var latest *icu.Wellness
+	seen := make(map[string]bool, len(days))
 
 	for i := range days {
 		d := &days[i]
 		switch {
 		case d.ID == today:
 			todayW = d
-		case d.ID < today:
+		case d.ID < today && !seen[d.ID]:
+			seen[d.ID] = true
 			window = append(window, toVerdictDay(*d))
 			if latest == nil || d.ID > latest.ID {
 				latest = d
 			}
 		}
 	}
+	slices.SortFunc(window, func(a, b verdict.Day) int {
+		return strings.Compare(a.Date, b.Date)
+	})
 
 	in := verdict.Input{
 		Today:     verdict.Day{Date: today},

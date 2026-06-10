@@ -21,5 +21,8 @@ func (GoogleValidator) Validate(ctx context.Context, token, audience string) (st
 	if email == "" {
 		return "", fmt.Errorf("idtoken: no email claim")
 	}
+	if verified, _ := payload.Claims["email_verified"].(bool); !verified {
+		return "", fmt.Errorf("idtoken: email claim not verified")
+	}
 	return email, nil
 }

@@ -20,14 +20,16 @@
    gcloud iam workload-identity-pools providers create-oidc github \
      --location=global --workload-identity-pool=github \
      --issuer-uri="https://token.actions.githubusercontent.com" \
-     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-     --attribute-condition="assertion.repository=='maroffo/cadenza'"
+     --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+     --attribute-condition="assertion.repository=='maroffo/cadenza' && assertion.ref=='refs/heads/main'"
    gcloud iam service-accounts add-iam-policy-binding \
      cadenza-deploy@$PROJECT.iam.gserviceaccount.com \
      --role=roles/iam.workloadIdentityUser \
      --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/maroffo/cadenza"
+   # run.developer, not run.admin: the deploy SA must not be able to flip
+   # service IAM (setIamPolicy) on anything in the project.
    gcloud projects add-iam-policy-binding $PROJECT \
-     --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/run.admin
+     --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/run.developer
    gcloud projects add-iam-policy-binding $PROJECT \
      --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/artifactregistry.writer
    gcloud iam service-accounts add-iam-policy-binding \

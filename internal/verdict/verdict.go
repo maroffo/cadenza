@@ -99,6 +99,9 @@ type Verdict struct {
 }
 
 // capsFor maps each rule to the most conservative session it still allows.
+// Caps semantics: 0 means "no cap on that axis", so every SKIP-class rule
+// must set BOTH axes (an injury day allows bounded easy movement, never
+// unlimited anything).
 var capsFor = map[string]Caps{
 	"missing_data":        {MaxZone: 2, MaxMinutes: 60},
 	"hrv_low":             {MaxZone: 2, MaxMinutes: 60},
@@ -107,7 +110,7 @@ var capsFor = map[string]Caps{
 	"resting_hr_high":     {MaxZone: 1, MaxMinutes: 30},
 	"short_sleep":         {MaxZone: 2, MaxMinutes: 75},
 	"ramp_over_cap":       {MaxZone: 3, MaxMinutes: 60},
-	"injury_active":       {MaxZone: 1, MaxMinutes: 0},
+	"injury_active":       {MaxZone: 1, MaxMinutes: 45},
 }
 
 // skipRules escalate the verdict to SKIP; everything else fired is MODIFY.

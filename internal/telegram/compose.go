@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html"
 	"strings"
+	"unicode/utf8"
 )
 
 // telegramLimit is the Bot API hard cap per message.
@@ -143,12 +144,17 @@ func SplitMessage(s string) []string {
 }
 
 // safeCut finds a cut point at or before limit that does not sever an HTML
-// tag, preferring newline, then space.
+// tag or a multibyte rune, preferring newline, then space.
 func safeCut(s string, limit int) int {
 	cut := limit
-	if idx := strings.LastIndexByte(s[:limit], '\n'); idx > 0 {
+	// Never cut mid-rune: emoji and accented Italian are routine here, and
+	// an invalid-UTF-8 chunk makes Telegram reject the whole message.
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if idx := strings.LastIndexByte(s[:cut], '\n'); idx > 0 {
 		cut = idx
-	} else if idx := strings.LastIndexByte(s[:limit], ' '); idx > 0 {
+	} else if idx := strings.LastIndexByte(s[:cut], ' '); idx > 0 {
 		cut = idx
 	}
 	// If an unclosed '<' precedes the cut, back off to just before it.
@@ -159,6 +165,9 @@ func safeCut(s string, limit int) int {
 	}
 	if cut == 0 {
 		cut = limit // degenerate input (single giant tag); cap rather than loop
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
 	}
 	return cut
 }

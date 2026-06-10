@@ -23,6 +23,7 @@ func (d Deps) Dispatch(ctx context.Context, env task.Envelope) error {
 	case task.TypeWatchdog:
 		return d.Watchdog.Run(ctx)
 	default:
-		return fmt.Errorf("dispatch: unhandled task type %q (id %s)", env.Type, env.ID)
+		// Unhandled type is poison: retrying cannot make a handler appear.
+		return fmt.Errorf("dispatch: unhandled task type %q (id %s): %w", env.Type, env.ID, task.ErrPoison)
 	}
 }

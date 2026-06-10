@@ -63,7 +63,7 @@ func run(ctx context.Context, yamlPath string, lookbackDays int, dryRun bool) er
 	newest := time.Now().In(tz).Format("2006-01-02")
 	oldest := time.Now().In(tz).AddDate(0, 0, -lookbackDays).Format("2006-01-02")
 
-	icuClient := icu.New("https://intervals.icu/api/v1", cfg.ICUAPIKey, cfg.ICUAthleteID)
+	icuClient := icu.New(icu.DefaultBaseURL, cfg.ICUAPIKey, cfg.ICUAthleteID)
 	days, err := job.ICU{C: icuClient}.WellnessRange(ctx, oldest, newest)
 	if err != nil {
 		return fmt.Errorf("wellness history: %w", err)

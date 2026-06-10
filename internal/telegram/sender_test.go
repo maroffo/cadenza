@@ -23,7 +23,13 @@ type fakeTelegram struct {
 	requests []map[string]string
 	// failHTMLOnce makes the first HTML sendMessage fail with a parse error.
 	failHTMLOnce bool
-	failed       bool
+	// failOnce500 makes the first sendMessage fail with a 500 (non-parse).
+	failOnce500 bool
+	// failAllParse makes every parse_mode request fail with a parse error.
+	failAllParse bool
+	// failPlain makes plain (no parse_mode) requests fail too.
+	failPlain bool
+	failed    bool
 }
 
 func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
@@ -55,13 +61,29 @@ func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.requests = append(f.requests, form)
-	shouldFail := f.failHTMLOnce && !f.failed && form["parse_mode"] != ""
-	if shouldFail {
+	parseFail := form["parse_mode"] != "" &&
+		(f.failAllParse || (f.failHTMLOnce && !f.failed))
+	plainFail := form["parse_mode"] == "" && f.failPlain
+	serverFail := f.failOnce500 && !f.failed
+	if parseFail || serverFail {
 		f.failed = true
 	}
 	f.mu.Unlock()
 
-	if shouldFail {
+	switch {
+	case plainFail:
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": false, "error_code": 400, "description": "Bad Request: chat not found",
+		})
+		return
+	case serverFail:
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": false, "error_code": 500, "description": "Internal Server Error",
+		})
+		return
+	case parseFail:
 		w.WriteHeader(http.StatusBadRequest)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok": false, "error_code": 400,
@@ -161,5 +183,50 @@ func TestSend_LongMessageIsChunked(t *testing.T) {
 		if len(req["text"]) > 4096 {
 			t.Errorf("chunk %d over Telegram limit: %d", n, len(req["text"]))
 		}
+	}
+}
+
+func TestSend_NonParseErrorNoFallback(t *testing.T) {
+	fake := &fakeTelegram{failOnce500: true}
+	s := newTestSender(t, fake)
+
+	err := s.Send(context.Background(), "<b>hi</b>")
+	if err == nil {
+		t.Fatal("Send = nil, want error on 500")
+	}
+	for _, req := range fake.requests[1:] {
+		if req["parse_mode"] == "" {
+			t.Fatal("plain fallback attempted on a non-parse error")
+		}
+	}
+}
+
+func TestSend_FallbackFailureSurfaces(t *testing.T) {
+	fake := &fakeTelegram{failAllParse: true, failPlain: true}
+	s := newTestSender(t, fake)
+
+	err := s.Send(context.Background(), "<b>hi</b>")
+	if err == nil {
+		t.Fatal("Send = nil, want error when both HTML and plain fail")
+	}
+	if !strings.Contains(err.Error(), "plain fallback") {
+		t.Errorf("err = %v, want plain fallback failure", err)
+	}
+}
+
+func TestSend_ParseErrorOnLaterChunkFallsBack(t *testing.T) {
+	fake := &fakeTelegram{failHTMLOnce: true}
+	s := newTestSender(t, fake)
+
+	long := strings.Repeat("riga\n\n", 800) // forces 2+ chunks
+	if err := s.Send(context.Background(), long); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	// First chunk: HTML 400 + plain retry; remaining chunks HTML ok.
+	if len(fake.requests) < 3 {
+		t.Fatalf("requests = %d, want at least 3 (failed HTML, plain retry, next chunk)", len(fake.requests))
+	}
+	if fake.requests[1]["parse_mode"] != "" {
+		t.Error("second request should be the plain retry of chunk 1")
 	}
 }

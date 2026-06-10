@@ -6,6 +6,7 @@ package telegram
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func fp(v float64) *float64 { return &v }
@@ -117,5 +118,19 @@ func TestEscape(t *testing.T) {
 	}
 	if !strings.Contains(got, "&amp;") {
 		t.Errorf("Escape missed ampersand: %q", got)
+	}
+}
+
+func TestSplitMessage_MultibyteSafe(t *testing.T) {
+	// A giant no-space emoji paragraph must never split mid-rune: an
+	// invalid-UTF-8 chunk makes Telegram reject the whole message.
+	msg := strings.Repeat("📈", 2000) // 8000 bytes, no spaces or newlines
+	for n, c := range SplitMessage(msg) {
+		if len(c) > telegramLimit {
+			t.Errorf("chunk %d over limit: %d", n, len(c))
+		}
+		if !utf8.ValidString(c) {
+			t.Errorf("chunk %d is invalid UTF-8 (split mid-rune)", n)
+		}
 	}
 }

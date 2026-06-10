@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,5 +120,44 @@ func TestExecutor_DispatchErrorIs500ForRetry(t *testing.T) {
 	})
 	if rec := post(t, e, "Bearer tok", validBody); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("code = %d, want 500 (Cloud Tasks must retry)", rec.Code)
+	}
+}
+
+func TestExecutor_UnconfiguredFailsClosed(t *testing.T) {
+	// idtoken.Validate skips the audience check when audience is empty, so
+	// an unconfigured executor must refuse to serve at all.
+	e := &Executor{Validator: &stubValidator{email: "cadenza-invoker@proj.iam.gserviceaccount.com"}}
+	if rec := post(t, e, "Bearer tok", validBody); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code = %d, want 503 (fail closed without audience/invoker)", rec.Code)
+	}
+}
+
+func TestExecutor_PoisonDispatchDroppedWith200(t *testing.T) {
+	v := &stubValidator{email: "cadenza-invoker@proj.iam.gserviceaccount.com"}
+	e := newExecutor(v, func(_ context.Context, env task.Envelope) error {
+		return fmt.Errorf("dispatch: unhandled task type %q: %w", env.Type, task.ErrPoison)
+	})
+	body := `{"v":1,"type":"injury_wakeup","id":"x"}`
+	if rec := post(t, e, "Bearer tok", body); rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 (poison must not burn retries)", rec.Code)
+	}
+}
+
+func TestExecutor_OversizedBodyDropped(t *testing.T) {
+	// Envelopes are tiny by design; anything above the cap is never
+	// legitimate, so it takes the poison path rather than retrying.
+	v := &stubValidator{email: "cadenza-invoker@proj.iam.gserviceaccount.com"}
+	called := false
+	e := newExecutor(v, func(context.Context, task.Envelope) error {
+		called = true
+		return nil
+	})
+	big := `{"v":1,"type":"morning_check","id":"` + strings.Repeat("a", maxEnvelopeBytes) + `"}`
+	rec := post(t, e, "Bearer tok", big)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code = %d, want 200 drop", rec.Code)
+	}
+	if called {
+		t.Fatal("dispatch called for oversized body")
 	}
 }

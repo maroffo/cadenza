@@ -6,8 +6,13 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 )
+
+// ErrPoison marks failures that no retry can fix (unhandled type, malformed
+// payload). The executor drops these with 200 instead of burning attempts.
+var ErrPoison = errors.New("poison task")
 
 const EnvelopeVersion = 1
 

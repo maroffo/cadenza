@@ -77,7 +77,10 @@ func run(ctx context.Context, runOnce string) error {
 		Handler:           server.New(server.Deps{Executor: executor}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// Bounds slow readers without killing legitimate executor runs,
+		// which hold the response open for the whole morning job.
+		WriteTimeout: 10 * time.Minute,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
@@ -113,8 +116,10 @@ func buildJobs(ctx context.Context, cfg *config.Config) (job.Deps, error) {
 		return job.Deps{}, fmt.Errorf("firestore: %w", err)
 	}
 
-	icuClient := icu.New("https://intervals.icu/api/v1", cfg.ICUAPIKey, cfg.ICUAthleteID,
-		icu.WithRateLimit(cfg.ICURatePerSec, int(cfg.ICURatePerSec)))
+	// Burst floor of 1: a configured rate in (0,1) would otherwise truncate
+	// to burst 0, which blocks every request forever.
+	icuClient := icu.New(icu.DefaultBaseURL, cfg.ICUAPIKey, cfg.ICUAthleteID,
+		icu.WithRateLimit(cfg.ICURatePerSec, max(1, int(cfg.ICURatePerSec))))
 
 	tgBot, err := bot.New(cfg.TelegramBotToken, bot.WithSkipGetMe())
 	if err != nil {

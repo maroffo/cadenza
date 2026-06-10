@@ -312,3 +312,140 @@ func TestRenderBlock_GoIsCompact(t *testing.T) {
 		t.Errorf("GO block should be compact, got %d chars:\n%s", len(block), block)
 	}
 }
+
+func TestCompute_ThresholdBoundariesDoNotFire(t *testing.T) {
+	// Exact-threshold values must NOT fire (< and > comparisons, not <=/>=).
+	d := greenDay("2026-06-10")
+	d.HRV = f(63.5)           // exactly mean - 0.75*SD
+	d.SleepSecs = i(6 * 3600) // exactly the minimum
+	d.RampRate = f(4.0)       // exactly the cap
+	v := Compute(Input{
+		Today:     d,
+		Window:    []Day{greenDay("2026-06-08"), greenDay("2026-06-09")},
+		Baselines: baselines,
+		RampCap:   4.0,
+	}, DefaultRules())
+	if v.Kind != Go {
+		t.Errorf("Kind = %s with boundary values, want GO (reasons %+v)", v.Kind, v.Reasons)
+	}
+}
+
+func TestCompute_ZeroRampCapClampsToTierA(t *testing.T) {
+	// Unseeded cap (0) must default to the Tier A ceiling, not disable the rule.
+	d := greenDay("2026-06-10")
+	d.RampRate = f(6.5)
+	v := Compute(Input{
+		Today: d, Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 0,
+	}, DefaultRules())
+	fired := false
+	for _, r := range v.Reasons {
+		if r.RuleID == "ramp_over_cap" {
+			fired = true
+		}
+	}
+	if !fired {
+		t.Error("ramp 6.5 with cap 0 must fire against the Tier A ceiling 6.0")
+	}
+
+	d.RampRate = f(5.5)
+	v = Compute(Input{
+		Today: d, Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 0,
+	}, DefaultRules())
+	for _, r := range v.Reasons {
+		if r.RuleID == "ramp_over_cap" {
+			t.Error("ramp 5.5 under the Tier A ceiling must not fire with cap 0")
+		}
+	}
+}
+
+func TestCompute_CapsMergeToMostRestrictive(t *testing.T) {
+	// hrv_low_3d (Z1/30) + ramp_over_cap (Z3/60) must merge to Z1/30.
+	d := greenDay("2026-06-10")
+	d.HRV = f(58)
+	d.RampRate = f(5.5)
+	v := Compute(Input{
+		Today: d,
+		Window: []Day{
+			func() Day { w := greenDay("2026-06-08"); w.HRV = f(60); return w }(),
+			func() Day { w := greenDay("2026-06-09"); w.HRV = f(59); return w }(),
+		},
+		Baselines: baselines, RampCap: 4.0,
+	}, DefaultRules())
+	if v.Caps.MaxZone != 1 || v.Caps.MaxMinutes != 30 {
+		t.Errorf("Caps = %+v, want {1 30} (most restrictive wins)", v.Caps)
+	}
+}
+
+func TestTighten(t *testing.T) {
+	cases := []struct {
+		name       string
+		a, b, want Caps
+	}{
+		{"zero left", Caps{}, Caps{MaxZone: 2, MaxMinutes: 60}, Caps{MaxZone: 2, MaxMinutes: 60}},
+		{"zero right", Caps{MaxZone: 2, MaxMinutes: 60}, Caps{}, Caps{MaxZone: 2, MaxMinutes: 60}},
+		{"both set", Caps{MaxZone: 3, MaxMinutes: 30}, Caps{MaxZone: 1, MaxMinutes: 60}, Caps{MaxZone: 1, MaxMinutes: 30}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tighten(tc.a, tc.b); got != tc.want {
+				t.Errorf("tighten(%+v, %+v) = %+v, want %+v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCompute_InjuryBelowThresholdIsGo(t *testing.T) {
+	v := Compute(Input{
+		Today: greenDay("2026-06-10"), Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+		Injuries: []ActiveInjury{{BodyPart: "knee", Pain: 3}},
+	}, DefaultRules())
+	if v.Kind != Go {
+		t.Errorf("Kind = %s with pain 3 (< threshold 4), want GO", v.Kind)
+	}
+}
+
+func TestCompute_MultipleInjuriesAllReported(t *testing.T) {
+	v := Compute(Input{
+		Today: greenDay("2026-06-10"), Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+		Injuries: []ActiveInjury{{BodyPart: "knee", Pain: 5}, {BodyPart: "achilles", Pain: 6}},
+	}, DefaultRules())
+	if v.Kind != Skip {
+		t.Fatalf("Kind = %s, want SKIP", v.Kind)
+	}
+	count := 0
+	for _, r := range v.Reasons {
+		if r.RuleID == "injury_active" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Errorf("injury_active reasons = %d, want 2", count)
+	}
+	if v.Caps.MaxMinutes == 0 {
+		t.Error("injury SKIP must bound minutes too (0 means uncapped)")
+	}
+}
+
+func TestRenderBlock_CapsGapsAndSkip(t *testing.T) {
+	d := greenDay("2026-06-10")
+	d.HRV = nil // missing_data: gap + caps
+	v := Compute(Input{
+		Today: d, Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+		Injuries: []ActiveInjury{{BodyPart: "knee", Pain: 5}},
+	}, DefaultRules())
+	block := RenderBlock(v)
+	if !strings.Contains(block, "SKIP") || !strings.Contains(block, "🔴") {
+		t.Errorf("SKIP render missing kind/emoji:\n%s", block)
+	}
+	if !strings.Contains(block, "Limiti oggi") {
+		t.Errorf("caps line missing:\n%s", block)
+	}
+	if !strings.Contains(block, "Dati mancanti") {
+		t.Errorf("data gaps line missing:\n%s", block)
+	}
+}

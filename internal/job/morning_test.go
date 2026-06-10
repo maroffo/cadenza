@@ -219,3 +219,95 @@ func TestWatchdog_AlertsWhenMorningMissing(t *testing.T) {
 		t.Errorf("unexpected notice:\n%s", out.plain[0])
 	}
 }
+
+func TestMorning_WindowSortedBeforeConsecutiveRun(t *testing.T) {
+	// API order [08-green, 07-low, 09-low] + today low. Without sorting, the
+	// backwards scan would see 09,07 both low and SKIP after 2 real days;
+	// sorted, 09-low then 08-green breaks the run: MODIFY hrv_low.
+	low := func(date string) icu.Wellness {
+		d := green(date)
+		d.HRV = fp(58)
+		return d
+	}
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{
+		green("2026-06-08"), low("2026-06-07"), low("2026-06-09"), low("2026-06-10"),
+	}}, out, runs)
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.verdicts) != 1 {
+		t.Fatalf("verdicts = %d, want 1", len(out.verdicts))
+	}
+	v := out.verdicts[0]
+	if v.Kind != verdict.Modify {
+		t.Errorf("Kind = %s, want MODIFY (green 06-08 must break the run)", v.Kind)
+	}
+	for _, r := range v.Reasons {
+		if r.RuleID == "hrv_low_3d" {
+			t.Error("hrv_low_3d fired on a non-consecutive run (window not sorted?)")
+		}
+	}
+}
+
+func TestMorning_DuplicateWindowDatesNotDoubleCounted(t *testing.T) {
+	// The same low day delivered twice must not count as two low days.
+	low := func(date string) icu.Wellness {
+		d := green(date)
+		d.HRV = fp(58)
+		return d
+	}
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{
+		low("2026-06-09"), low("2026-06-09"), low("2026-06-10"),
+	}}, out, runs)
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	v := out.verdicts[0]
+	for _, r := range v.Reasons {
+		if r.RuleID == "hrv_low_3d" {
+			t.Error("hrv_low_3d fired with only 2 distinct low days (duplicates double-counted)")
+		}
+	}
+}
+
+func TestMorning_RunsCheckErrorPropagates(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	runs.checkErr = errors.New("firestore down")
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+
+	if err := m.Run(context.Background()); err == nil {
+		t.Fatal("Run = nil, want completion-check error")
+	}
+	if len(out.bodies) != 0 {
+		t.Fatal("must not send when the idempotency check is unavailable")
+	}
+}
+
+func TestMorning_MarkErrorAfterSendPropagates(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	runs.markErr = errors.New("firestore down")
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+
+	err := m.Run(context.Background())
+	if err == nil {
+		t.Fatal("Run = nil, want mark error (caller must retry until the mark sticks)")
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1 (message goes out before the mark)", len(out.bodies))
+	}
+}
+
+func TestBaselines_RHRFloorRejected(t *testing.T) {
+	days := wellnessWith(repeatF(60, 20), repeatI(47, 5))
+	if _, err := ComputeBaselines(days); err == nil {
+		t.Fatal("5 resting HR samples accepted; RHR baseline floor must apply")
+	}
+}

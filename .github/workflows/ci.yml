@@ -30,6 +30,9 @@ jobs:
       - name: make check
         run: make check
       - name: make test-e2e
+        env:
+          FIRESTORE_EMULATOR_HOST: localhost:8090
+          REQUIRE_EMULATOR: "1"
         run: make test-e2e
       - name: Emulator suite
         env:
