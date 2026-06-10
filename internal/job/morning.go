@@ -61,23 +61,14 @@ func (m Morning) Run(ctx context.Context) error {
 		return nil
 	}
 
-	baselines, rampCap, err := m.Profiles.Profile(ctx)
-	if err != nil {
-		return fmt.Errorf("morning: profile: %w", err)
-	}
-
-	oldest := m.Now().In(m.TZ).AddDate(0, 0, -7).Format(dateLayout)
-	days, err := m.Wellness.WellnessRange(ctx, oldest, today)
+	body, v, err := m.Compose(ctx)
 	if err != nil {
 		// No degraded message here: the caller's retry policy gets its shot
 		// first; the watchdog covers persistent absence (decision 16).
-		return fmt.Errorf("morning: wellness fetch: %w", err)
+		return err
 	}
 
-	data, in := assemble(today, days, baselines, rampCap)
-	v := verdict.Compute(in, verdict.DefaultRules())
-
-	if err := m.Out.SendWithVerdict(ctx, telegram.MorningBody(data), v); err != nil {
+	if err := m.Out.SendWithVerdict(ctx, body, v); err != nil {
 		return fmt.Errorf("morning: send: %w", err)
 	}
 	if err := m.Runs.MarkMorningCompleted(ctx, today, string(v.Kind)); err != nil {
@@ -86,6 +77,27 @@ func (m Morning) Run(ctx context.Context) error {
 		return fmt.Errorf("morning: mark completed: %w", err)
 	}
 	return nil
+}
+
+// Compose builds the morning body and verdict without side effects. The
+// morning job sends and marks; /status (M3) sends without marking.
+func (m Morning) Compose(ctx context.Context) (string, verdict.Verdict, error) {
+	today := m.Now().In(m.TZ).Format(dateLayout)
+
+	baselines, rampCap, err := m.Profiles.Profile(ctx)
+	if err != nil {
+		return "", verdict.Verdict{}, fmt.Errorf("morning: profile: %w", err)
+	}
+
+	oldest := m.Now().In(m.TZ).AddDate(0, 0, -7).Format(dateLayout)
+	days, err := m.Wellness.WellnessRange(ctx, oldest, today)
+	if err != nil {
+		return "", verdict.Verdict{}, fmt.Errorf("morning: wellness fetch: %w", err)
+	}
+
+	data, in := assemble(today, days, baselines, rampCap)
+	v := verdict.Compute(in, verdict.DefaultRules())
+	return telegram.MorningBody(data), v, nil
 }
 
 // assemble maps wellness days onto the message data and the verdict input.

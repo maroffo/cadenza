@@ -1,5 +1,5 @@
 // ABOUTME: Service entrypoint: load config, wire dependencies, serve with graceful shutdown.
-// ABOUTME: --job morning|watchdog runs one job in-process and exits: the GCP-free dev loop.
+// ABOUTME: --job runs one job in-process; --poll long-polls Telegram: the GCP-free dev loops.
 
 package main
 
@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"github.com/go-telegram/bot"
 
 	"github.com/maroffo/cadenza/internal/config"
@@ -28,15 +29,16 @@ import (
 
 func main() {
 	runOnce := flag.String("job", "", "run one job in-process and exit: morning|watchdog")
+	poll := flag.Bool("poll", false, "dev mode: long-poll Telegram instead of serving the webhook")
 	flag.Parse()
 
-	if err := run(context.Background(), *runOnce); err != nil {
+	if err := run(context.Background(), *runOnce, *poll); err != nil {
 		slog.Error("cadenza", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, runOnce string) error {
+func run(ctx context.Context, runOnce string, poll bool) error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
@@ -49,9 +51,9 @@ func run(ctx context.Context, runOnce string) error {
 	if err != nil {
 		return err
 	}
+	local := task.Local{Dispatch: deps.Dispatch}
 
 	if runOnce != "" {
-		local := task.Local{Dispatch: deps.Dispatch}
 		today := time.Now().In(deps.Morning.TZ).Format("2006-01-02")
 		envelope := task.Envelope{V: task.EnvelopeVersion, ID: runOnce + "-" + today}
 		switch runOnce {
@@ -65,16 +67,47 @@ func run(ctx context.Context, runOnce string) error {
 		return local.Enqueue(ctx, envelope)
 	}
 
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if poll {
+		if cfg.Env == "prod" {
+			return fmt.Errorf("--poll is dev-only; prod uses the webhook")
+		}
+		return telegram.Poll(ctx, cfg.TelegramBotToken, local)
+	}
+
+	// Webhook enqueuer: durable Cloud Tasks in prod, in-process in dev.
+	var enq task.Enqueuer = local
+	if cfg.Env == "prod" {
+		tasksClient, err := cloudtasks.NewClient(ctx)
+		if err != nil {
+			return fmt.Errorf("cloudtasks client: %w", err)
+		}
+		defer func() { _ = tasksClient.Close() }()
+		enq = &task.CloudTasks{
+			Client:    tasksClient,
+			QueuePath: cfg.TasksQueuePath,
+			TargetURL: cfg.ExecutorAudience + "/internal/execute",
+			InvokerSA: cfg.InvokerEmail,
+		}
+	}
+
 	executor := &server.Executor{
 		Validator:    server.GoogleValidator{},
 		Audience:     cfg.ExecutorAudience,
 		InvokerEmail: cfg.InvokerEmail,
 		Dispatch:     deps.Dispatch,
 	}
+	webhook := &server.Webhook{
+		Secret:        cfg.TelegramWebhookSecret,
+		AllowedUserID: cfg.TelegramChatID,
+		Enqueue:       enq,
+	}
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           server.New(server.Deps{Executor: executor}),
+		Handler:           server.New(server.Deps{Executor: executor, Webhook: webhook}),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Bounds slow readers without killing legitimate executor runs,
@@ -82,9 +115,6 @@ func run(ctx context.Context, runOnce string) error {
 		WriteTimeout: 10 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
-
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.ListenAndServe() }()
@@ -137,5 +167,12 @@ func buildJobs(ctx context.Context, cfg *config.Config) (job.Deps, error) {
 		TZ:       tz,
 	}
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
-	return job.Deps{Morning: morning, Watchdog: watchdog}, nil
+	message := job.Message{
+		AllowedUserID: cfg.TelegramChatID,
+		Dedup:         store.NewDedup(fsClient),
+		Chats:         store.NewChats(fsClient),
+		Out:           sender,
+		Morning:       morning,
+	}
+	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message}, nil
 }

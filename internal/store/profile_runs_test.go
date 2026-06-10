@@ -75,3 +75,21 @@ func TestRuns_MorningLifecycle(t *testing.T) {
 		t.Fatal("marked date reports not completed")
 	}
 }
+
+func TestChats_SaveAndGet(t *testing.T) {
+	client := emulatorClient(t)
+	c := NewChats(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := c.Save(ctx, 424242, 424242); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	chatID, userID, err := c.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if chatID != 424242 || userID != 424242 {
+		t.Errorf("got chat=%d user=%d, want 424242/424242", chatID, userID)
+	}
+}

@@ -58,6 +58,37 @@ func (s *Sender) Send(ctx context.Context, text string) error {
 	return nil
 }
 
+// AnswerCallback acknowledges a callback query. Mandatory after every tap or
+// the client shows a stuck spinner for up to a minute.
+func (s *Sender) AnswerCallback(ctx context.Context, callbackID string) error {
+	_, err := s.b.AnswerCallbackQuery(ctx, &bot.AnswerCallbackQueryParams{
+		CallbackQueryID: callbackID,
+	})
+	if err != nil {
+		return fmt.Errorf("telegram answer callback: %w", err)
+	}
+	return nil
+}
+
+// SendWithButton sends an HTML message with a single inline button.
+// callbackData must stay within Telegram's 64-byte limit.
+func (s *Sender) SendWithButton(ctx context.Context, text, buttonLabel, callbackData string) error {
+	_, err := s.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    s.chatID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+		ReplyMarkup: models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{
+				{{Text: buttonLabel, CallbackData: callbackData}},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("telegram send with button: %w", err)
+	}
+	return nil
+}
+
 func isParseError(err error) bool {
 	return strings.Contains(err.Error(), "can't parse entities")
 }
