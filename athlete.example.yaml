@@ -1,0 +1,6 @@
+# ABOUTME: Athlete seed template; copy to athlete.yaml (gitignored) and adjust.
+# ABOUTME: Baselines are computed from intervals.icu history; only judgment values live here.
+
+# CTL ramp cap per week. Spec default for masters athletes 45+: 4.0-5.0.
+# The code ceiling (Tier A) is 6.0 regardless of what is written here.
+ramp_cap: 4.0

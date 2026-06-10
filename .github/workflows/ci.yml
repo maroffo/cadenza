@@ -1,0 +1,38 @@
+# ABOUTME: CI gate on PRs and dev: lint, vet, fmt, vuln, race tests, e2e, emulator suite.
+# ABOUTME: REQUIRE_EMULATOR=1 turns silent emulator skips into failures (no hollow gates).
+
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      firestore:
+        image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+        ports: ["8090:8090"]
+        options: >-
+          --health-cmd "curl -sf http://localhost:8090 || exit 1"
+          --health-interval 5s --health-retries 30 --health-start-period 10s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install tools
+        run: |
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: make check
+        run: make check
+      - name: make test-e2e
+        run: make test-e2e
+      - name: Emulator suite
+        env:
+          FIRESTORE_EMULATOR_HOST: localhost:8090
+          REQUIRE_EMULATOR: "1"
+        run: go test -race -count=1 ./internal/store/...

@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+# ABOUTME: Idempotent GCP bootstrap for cadenza: every resource, describe-before-create.
+# ABOUTME: Doubles as the runbook; safe to re-run. Requires: gcloud auth + a billing-enabled project.
+
+set -euo pipefail
+
+# ---- Parameters (override via env) -----------------------------------------
+PROJECT="${PROJECT:?set PROJECT to the dedicated GCP project id}"
+REGION="${REGION:-europe-west1}"
+SERVICE="${SERVICE:-cadenza}"
+QUEUE="${QUEUE:-cadenza-exec}"
+TZ_CRON="${TZ_CRON:-Europe/Rome}"
+ALERT_EMAIL="${ALERT_EMAIL:?set ALERT_EMAIL for the dead-man's switch channel}"
+GITHUB_REPO="${GITHUB_REPO:-maroffo/cadenza}"
+
+RUN_SA="cadenza-run@${PROJECT}.iam.gserviceaccount.com"
+INVOKER_SA="cadenza-invoker@${PROJECT}.iam.gserviceaccount.com"
+DEPLOY_SA="cadenza-deploy@${PROJECT}.iam.gserviceaccount.com"
+
+gcloud config set project "$PROJECT" >/dev/null
+
+say() { printf '\n=== %s\n' "$*"; }
+
+# ---- APIs -------------------------------------------------------------------
+say "Enabling APIs"
+gcloud services enable \
+  run.googleapis.com cloudtasks.googleapis.com cloudscheduler.googleapis.com \
+  firestore.googleapis.com secretmanager.googleapis.com \
+  artifactregistry.googleapis.com monitoring.googleapis.com \
+  iamcredentials.googleapis.com cloudbuild.googleapis.com
+
+# ---- Service accounts ---------------------------------------------------------
+say "Service accounts"
+for SA_DESC in "cadenza-run:Cadenza runtime" "cadenza-invoker:Scheduler/Tasks invoker" "cadenza-deploy:GitHub Actions deployer"; do
+  SA_ID="${SA_DESC%%:*}"; DESC="${SA_DESC#*:}"
+  if ! gcloud iam service-accounts describe "${SA_ID}@${PROJECT}.iam.gserviceaccount.com" >/dev/null 2>&1; then
+    gcloud iam service-accounts create "$SA_ID" --display-name="$DESC"
+  fi
+done
+
+say "IAM bindings"
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${RUN_SA}" --role=roles/datastore.user --condition=None >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${RUN_SA}" --role=roles/cloudtasks.enqueuer --condition=None >/dev/null
+# Run SA must mint OIDC tokens as the invoker SA when enqueueing tasks (M3+).
+gcloud iam service-accounts add-iam-policy-binding "$INVOKER_SA" \
+  --member="serviceAccount:${RUN_SA}" --role=roles/iam.serviceAccountUser >/dev/null
+
+# ---- Firestore ----------------------------------------------------------------
+say "Firestore (Native, ${REGION})"
+if ! gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
+  gcloud firestore databases create --location="$REGION" --type=firestore-native
+fi
+say "Firestore TTL policy on dedup.expires_at"
+gcloud firestore fields ttls update expires_at \
+  --collection-group=dedup --enable-ttl --async || true
+
+# ---- Artifact Registry ---------------------------------------------------------
+say "Artifact Registry"
+if ! gcloud artifacts repositories describe cadenza --location="$REGION" >/dev/null 2>&1; then
+  gcloud artifacts repositories create cadenza --location="$REGION" --repository-format=docker
+fi
+
+# ---- Secrets (values added manually; pinned versions referenced by deploy) -----
+say "Secrets (create empty shells; add versions with: gcloud secrets versions add <name> --data-file=-)"
+for S in cadenza-telegram-bot-token cadenza-telegram-webhook-secret cadenza-icu-api-key cadenza-anthropic-api-key; do
+  if ! gcloud secrets describe "$S" >/dev/null 2>&1; then
+    gcloud secrets create "$S" --replication-policy=user-managed --locations="$REGION"
+  fi
+  gcloud secrets add-iam-policy-binding "$S" \
+    --member="serviceAccount:${RUN_SA}" --role=roles/secretmanager.secretAccessor >/dev/null
+done
+
+# ---- Cloud Tasks queue (created now, consumed from M3) -------------------------
+say "Cloud Tasks queue"
+if ! gcloud tasks queues describe "$QUEUE" --location="$REGION" >/dev/null 2>&1; then
+  gcloud tasks queues create "$QUEUE" --location="$REGION"
+fi
+gcloud tasks queues update "$QUEUE" --location="$REGION" \
+  --max-concurrent-dispatches=1 --max-dispatches-per-second=1 \
+  --max-attempts=5 --min-backoff=10s --max-backoff=300s >/dev/null
+
+# ---- First deploy must exist before Scheduler (needs the URL) ------------------
+say "Cloud Run service check"
+if ! gcloud run services describe "$SERVICE" --region="$REGION" >/dev/null 2>&1; then
+  cat <<'EOT'
+Cloud Run service not deployed yet. Deploy first (CI or manually):
+  gcloud run deploy cadenza --region=$REGION \
+    --image=$REGION-docker.pkg.dev/$PROJECT/cadenza/cadenza:latest \
+    --service-account=cadenza-run@$PROJECT.iam.gserviceaccount.com \
+    --allow-unauthenticated --min-instances=0 --max-instances=1 \
+    --timeout=600 --memory=512Mi --cpu-boost \
+    --set-env-vars=ENV=prod,GCP_PROJECT=$PROJECT,... \
+    --set-secrets=TELEGRAM_BOT_TOKEN=cadenza-telegram-bot-token:1,ICU_API_KEY=cadenza-icu-api-key:1
+Then re-run this script to create Scheduler jobs + invoker binding.
+EOT
+  exit 0
+fi
+
+SERVICE_URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')
+say "Service URL: $SERVICE_URL"
+
+gcloud run services add-iam-policy-binding "$SERVICE" --region="$REGION" \
+  --member="serviceAccount:${INVOKER_SA}" --role=roles/run.invoker >/dev/null
+
+# ---- Scheduler jobs -------------------------------------------------------------
+say "Scheduler jobs (${TZ_CRON})"
+create_job() {
+  local NAME="$1" CRON="$2" BODY="$3"
+  if gcloud scheduler jobs describe "$NAME" --location="$REGION" >/dev/null 2>&1; then
+    gcloud scheduler jobs update http "$NAME" --location="$REGION" \
+      --schedule="$CRON" --time-zone="$TZ_CRON" --uri="${SERVICE_URL}/internal/execute" \
+      --http-method=POST --message-body="$BODY" \
+      --oidc-service-account-email="$INVOKER_SA" --oidc-token-audience="$SERVICE_URL" \
+      --attempt-deadline=540s >/dev/null
+  else
+    gcloud scheduler jobs create http "$NAME" --location="$REGION" \
+      --schedule="$CRON" --time-zone="$TZ_CRON" --uri="${SERVICE_URL}/internal/execute" \
+      --http-method=POST --message-body="$BODY" \
+      --oidc-service-account-email="$INVOKER_SA" --oidc-token-audience="$SERVICE_URL" \
+      --attempt-deadline=540s >/dev/null
+  fi
+}
+# IDs are derived server-side from the date; static bodies are fine.
+create_job cadenza-morning   "0 7 * * *"  '{"v":1,"type":"morning_check","id":"morning-scheduler"}'
+create_job cadenza-watchdog  "15 7 * * *" '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
+
+# ---- Dead-man's switch: email on Scheduler failures + watchdog ERROR ------------
+say "Monitoring: notification channel + alert policies"
+CHANNEL=$(gcloud beta monitoring channels list --filter="displayName='cadenza-email'" --format='value(name)' | head -1)
+if [ -z "$CHANNEL" ]; then
+  CHANNEL=$(gcloud beta monitoring channels create --display-name="cadenza-email" \
+    --type=email --channel-labels="email_address=${ALERT_EMAIL}" --format='value(name)')
+fi
+ensure_policy() {
+  local DISPLAY="$1" FILTER="$2"
+  if ! gcloud alpha monitoring policies list --filter="displayName='${DISPLAY}'" --format='value(name)' | grep -q .; then
+    gcloud alpha monitoring policies create \
+      --display-name="$DISPLAY" --notification-channels="$CHANNEL" \
+      --condition-display-name="$DISPLAY" \
+      --condition-filter="$FILTER" \
+      --aggregation='{"alignmentPeriod":"300s","perSeriesAligner":"ALIGN_COUNT"}' \
+      --duration=0s --if=">0" --combiner=OR >/dev/null
+  fi
+}
+ensure_policy "cadenza scheduler failures" \
+  'metric.type="logging.googleapis.com/log_entry_count" resource.type="cloud_scheduler_job" severity>=ERROR'
+ensure_policy "cadenza watchdog errors" \
+  'metric.type="logging.googleapis.com/log_entry_count" resource.type="cloud_run_revision" resource.label."service_name"="'"$SERVICE"'" severity>=ERROR'
+
+say "Done. Remaining manual steps: see deploy/README.md"
