@@ -98,9 +98,18 @@ EOT
   exit 0
 fi
 
-SERVICE_URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')
-say "Service URL: $SERVICE_URL"
+# SERVICE_URL can be overridden: services can expose two URLs (legacy
+# x-suffix and deterministic project-number form) and status.url is not
+# stable about which one it reports. The OIDC audience must match the
+# EXECUTOR_AUDIENCE env exactly, so pass the canonical one explicitly.
+SERVICE_URL="${SERVICE_URL_OVERRIDE:-$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')}"
+say "Service URL (OIDC audience): $SERVICE_URL"
 
+# The deploy SA holds run.developer (least privilege, no setIamPolicy), so
+# the deploy workflow CANNOT apply --allow-unauthenticated itself: the
+# public binding for the Telegram webhook lives here instead. Idempotent.
+gcloud run services add-iam-policy-binding "$SERVICE" --region="$REGION" \
+  --member="allUsers" --role=roles/run.invoker >/dev/null
 gcloud run services add-iam-policy-binding "$SERVICE" --region="$REGION" \
   --member="serviceAccount:${INVOKER_SA}" --role=roles/run.invoker >/dev/null
 
