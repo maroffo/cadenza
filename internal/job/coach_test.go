@@ -695,3 +695,84 @@ func TestConverse_UnknownPlanFieldsRejected(t *testing.T) {
 		t.Error("unknown-field rejection not surfaced")
 	}
 }
+
+func TestConverse_RotationCarriesSummary(t *testing.T) {
+	// At the 40-turn cap the old thread must survive as a cheap-tier
+	// summary seeded into the fresh session ("si è dimenticato che vengo
+	// da un infortunio" must not happen again).
+	llm := fakes.NewAnthropic(
+		fakes.Text{S: "- Atleta in rientro da infortunio al polpaccio\n- Pianificato fondo Z2"},
+		fakes.Text{S: "Ripartiamo dal rientro: andiamo cauti."},
+	)
+	defer llm.Close()
+	c, out, convo, chat, _, _ := newCoach(t, llm)
+	c.Summary = agent.Summarizer{Client: agent.NewClient("k", llm.URL()), Model: "claude-haiku-test"}
+	chat.active = "s-full"
+	var long []store.Turn
+	for i := range maxSessionTurns {
+		content := "x"
+		if i == 3 {
+			content = "occhio che vengo da un infortunio al polpaccio"
+		}
+		long = append(long, store.Turn{Seq: i + 1, Role: "user", Content: content, Schema: 1})
+	}
+	convo.turns["s-full"] = long
+
+	if err := c.Converse(context.Background(), "come imposto la settimana?"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if len(llm.Requests) != 2 {
+		t.Fatalf("llm calls = %d, want 2 (summary + reply)", len(llm.Requests))
+	}
+	// First call: cheap tier, fed the old transcript.
+	if llm.Requests[0].Model != "claude-haiku-test" {
+		t.Errorf("summary model = %q", llm.Requests[0].Model)
+	}
+	if !strings.Contains(string(llm.Requests[0].Raw), "infortunio al polpaccio") {
+		t.Error("old thread not in the summary transcript")
+	}
+	// Second call: Opus sees the framed summary before the new message.
+	raw := string(llm.Requests[1].Raw)
+	if !strings.Contains(raw, "Riepilogo automatico") || !strings.Contains(raw, "rientro da infortunio") {
+		t.Errorf("summary not carried into the fresh session:\n%s", raw)
+	}
+	if !strings.Contains(raw, "non istruzioni") {
+		t.Error("summary missing the data-not-instructions framing")
+	}
+	// Seed persisted as turn 1 of the NEW session.
+	if len(convo.stubSessions.turns) == 0 || !strings.HasPrefix(convo.stubSessions.turns[0], "1:user:[Riepilo") {
+		t.Errorf("summary seed not persisted: %v", convo.stubSessions.turns)
+	}
+	if chat.active == "s-full" {
+		t.Error("session not rotated")
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("reply missing")
+	}
+}
+
+func TestConverse_SummaryFailureRotatesAnyway(t *testing.T) {
+	llm := fakes.NewAnthropic(
+		fakes.HTTPErr{Status: 400}, // summary call dies
+		fakes.Text{S: "riparto senza ponte"},
+	)
+	defer llm.Close()
+	c, out, convo, chat, _, _ := newCoach(t, llm)
+	c.Summary = agent.Summarizer{Client: agent.NewClient("k", llm.URL()), Model: "claude-haiku-test"}
+	chat.active = "s-full2"
+	var long []store.Turn
+	for i := range maxSessionTurns {
+		long = append(long, store.Turn{Seq: i + 1, Role: "user", Content: "x", Schema: 1})
+	}
+	convo.turns["s-full2"] = long
+
+	if err := c.Converse(context.Background(), "ci sei?"); err != nil {
+		t.Fatalf("Converse: %v (a summary failure must never block the athlete)", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("reply missing after summary failure")
+	}
+	if chat.active == "s-full2" {
+		t.Error("session not rotated")
+	}
+}
