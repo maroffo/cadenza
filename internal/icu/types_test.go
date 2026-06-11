@@ -270,7 +270,7 @@ func TestWellness_FullSurfaceDecodeAndCompactMarshal(t *testing.T) {
 		"fatTotal": 78.2, "hydration": 2.1, "bloodGlucose": 92.5,
 		"steps": 8421, "vo2max": 52.3, "mood": 2, "comments": "gambe pesanti",
 		"REMSleep": 1.4, "DeepSleep": 0.9, "respiration": 14.2,
-		"tempWeight": 71.3,
+		"tempWeight": true,
 		"weight": null, "spO2": null, "lactate": null
 	}]`)
 	days, err := DecodeWellnessRange(raw)
@@ -287,8 +287,8 @@ func TestWellness_FullSurfaceDecodeAndCompactMarshal(t *testing.T) {
 	if d.Protein == nil || *d.Protein != 132.5 || d.Carbohydrates == nil || d.FatTotal == nil {
 		t.Errorf("macros lost: %+v", d)
 	}
-	if d.REMSleep == nil || d.TempWeight == nil {
-		t.Errorf("sleep phases / interpolated weight lost")
+	if d.REMSleep == nil {
+		t.Errorf("sleep phases lost")
 	}
 	if d.Comments == nil || *d.Comments != "gambe pesanti" {
 		t.Errorf("athlete comments lost")

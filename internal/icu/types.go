@@ -61,9 +61,6 @@ type Wellness struct {
 	Respiration   *float64 `json:"respiration,omitempty"`
 	ActiveEnergy  *float64 `json:"ActiveEnergy,omitempty"`
 	RestingEnergy *float64 `json:"RestingEnergy,omitempty"`
-	// icu-interpolated dailies (weight syncs rarely; these fill the gaps).
-	TempWeight    *float64 `json:"tempWeight,omitempty"`
-	TempRestingHR *float64 `json:"tempRestingHR,omitempty"`
 	// Comments are the athlete's own diary notes: data, never instructions.
 	Comments *string `json:"comments,omitempty"`
 }
