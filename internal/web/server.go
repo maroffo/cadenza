@@ -4,12 +4,13 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"html/template"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -55,11 +56,13 @@ type ProfileAdmin interface {
 	SetRampCap(ctx context.Context, cap float64) error
 }
 
-// AuditSource reads the transparency collections.
+// AuditSource reads the transparency collections and records web-originated
+// profile changes (no profile change without an event, decision 14).
 type AuditSource interface {
 	RecentWrites(ctx context.Context, limit int) ([]store.WriteRecord, error)
 	RecentMutations(ctx context.Context, limit int) ([]store.MutationWithID, error)
 	SpentToday(ctx context.Context, date string) (int, error)
+	RecordWebChange(ctx context.Context, kind, oldValue, newValue string) error
 }
 
 // ChatHistory exposes the active conversation for the chat page.
@@ -67,9 +70,15 @@ type ChatHistory interface {
 	ActiveTurns(ctx context.Context, limit int) ([]store.Turn, error)
 }
 
+// WellnessSource is the read seam for trends/verdicts: same shape the job
+// layer uses, so handlers stay testable without a live intervals.icu.
+type WellnessSource interface {
+	ListWellness(ctx context.Context, p icu.GetWellnessRangeParams) (json.RawMessage, error)
+}
+
 type Server struct {
 	Auth     Auth
-	ICU      *icu.Client
+	ICU      WellnessSource
 	Status   StatusComposer
 	Chat     Converser
 	History  ChatHistory
@@ -97,13 +106,27 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/profile/rampcap", s.Auth.Require(s.setRampCap))
 	mux.HandleFunc("GET /app/chat", s.Auth.Require(s.chat))
 	mux.HandleFunc("POST /app/chat", s.Auth.Require(s.chatSend))
+	mux.HandleFunc("POST /app/logout", s.Auth.HandleLogout)
 }
 
 func (s *Server) render(w http.ResponseWriter, page string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, page, data); err != nil {
+	// Buffer first: a mid-render error must become a 500, not a silent
+	// truncated 200 with headers already gone.
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, page, data); err != nil {
 		slog.Error("web: render", "page", page, "err", err)
+		http.Error(w, "errore di rendering", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// CSP: self + the two pinned CDNs; inline script/style are part of the
+	// served pages (trends bootstrap, layout styles), so they stay allowed:
+	// SRI pins the external files byte-for-byte.
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; "+
+			"style-src 'self' 'unsafe-inline' https://unpkg.com; connect-src 'self'; "+
+			"img-src 'self' data:; frame-ancestors 'none'")
+	_, _ = buf.WriteTo(w)
 }
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +202,7 @@ func (s *Server) verdicts(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "error.html", map[string]any{"Msg": "profilo non disponibile"})
 		return
 	}
-	days, err := s.wellnessRange(r.Context(), 30)
+	days, err := s.wellnessRange(r.Context(), 37)
 	if err != nil {
 		s.render(w, "error.html", map[string]any{"Msg": "intervals.icu non disponibile"})
 		return
@@ -187,6 +210,9 @@ func (s *Server) verdicts(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(days, func(i, j int) bool { return days[i].ID < days[j].ID })
 	var rows []verdictRow
 	for i, d := range days {
+		if len(days) > 30 && i < len(days)-30 {
+			continue // the first week only seeds windows, never renders
+		}
 		var window []verdict.Day
 		for j := max(0, i-7); j < i; j++ {
 			window = append(window, dayFromWellness(days[j]))
@@ -222,10 +248,22 @@ func (s *Server) calendar(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) audit(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	muts, _ := s.Audit.RecentMutations(ctx, 20)
-	rules, _ := s.Rules.ListActive(ctx)
-	spent, _ := s.Audit.SpentToday(ctx, s.Now().In(s.TZ).Format("2006-01-02"))
-	baselines, rampCap, _ := s.Profiles.Profile(ctx)
+	muts, err := s.Audit.RecentMutations(ctx, 20)
+	if err != nil {
+		slog.Warn("web: mutations", "err", err)
+	}
+	rules, err := s.Rules.ListActive(ctx)
+	if err != nil {
+		slog.Warn("web: rules", "err", err)
+	}
+	spent, err := s.Audit.SpentToday(ctx, s.Now().In(s.TZ).Format("2006-01-02"))
+	if err != nil {
+		slog.Warn("web: budget", "err", err)
+	}
+	baselines, rampCap, err := s.Profiles.Profile(ctx)
+	if err != nil {
+		slog.Warn("web: profile", "err", err)
+	}
 	s.render(w, "audit.html", map[string]any{
 		"Page": "audit", "Mutations": muts, "Rules": rules,
 		"Spent": spent, "Baselines": baselines, "RampCap": rampCap,
@@ -270,13 +308,21 @@ func (s *Server) deactivateRule(w http.ResponseWriter, r *http.Request) {
 // the same ceiling the mutation path enforces.
 func (s *Server) setRampCap(w http.ResponseWriter, r *http.Request) {
 	capVal, err := strconv.ParseFloat(r.FormValue("ramp_cap"), 64)
-	if err != nil || capVal <= 0 || capVal > 6 {
+	// Positive-form guard: NaN fails BOTH capVal<=0 and capVal>6, so the
+	// negative form would wave it through (live finding from review).
+	if err != nil || math.IsNaN(capVal) || !(capVal > 0 && capVal <= 6) {
 		http.Error(w, "ramp_cap deve essere in (0, 6]", http.StatusBadRequest)
 		return
 	}
+	_, oldCap, _ := s.Profiles.Profile(r.Context())
 	if err := s.Profiles.SetRampCap(r.Context(), capVal); err != nil {
 		http.Error(w, "aggiornamento non riuscito", http.StatusInternalServerError)
 		return
+	}
+	// Same invariant as the bot path: no profile change without an event.
+	if err := s.Audit.RecordWebChange(r.Context(), "ramp_cap",
+		strconv.FormatFloat(oldCap, 'f', 1, 64), strconv.FormatFloat(capVal, 'f', 1, 64)); err != nil {
+		slog.Warn("web: ramp cap audit event failed", "err", err)
 	}
 	http.Redirect(w, r, "/app/audit", http.StatusSeeOther)
 }
@@ -292,6 +338,13 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 // chatSend posts one message through the SAME coach pipeline as Telegram
 // (budget, tools, gate, session) and renders the reply fragment for HTMX.
 func (s *Server) chatSend(w http.ResponseWriter, r *http.Request) {
+	if s.Chat == nil {
+		// Skeleton mode (no LLM configured): honest, never a typed-nil panic.
+		s.render(w, "chat_reply.html", map[string]any{
+			"User": r.FormValue("text"), "Reply": "Coach non configurato su questo ambiente.",
+		})
+		return
+	}
 	text := r.FormValue("text")
 	if text == "" || len(text) > 2000 {
 		http.Error(w, "messaggio vuoto o troppo lungo", http.StatusBadRequest)
@@ -308,5 +361,3 @@ func (s *Server) chatSend(w http.ResponseWriter, r *http.Request) {
 		"User": text, "Reply": reply, "Block": verdict.RenderBlock(v),
 	})
 }
-
-var _ = fmt.Sprintf // keep fmt for template helpers below

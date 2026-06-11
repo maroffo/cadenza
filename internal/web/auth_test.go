@@ -5,6 +5,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 type memSessions struct {
 	nonces   map[string]bool
 	sessions map[string]bool
+	saveErr  error
 }
 
 func newMemSessions() *memSessions {
@@ -31,7 +33,15 @@ func (m *memSessions) RedeemNonce(_ context.Context, nonce string, _ time.Durati
 }
 
 func (m *memSessions) SaveSession(_ context.Context, id string, _ time.Duration) error {
+	if m.saveErr != nil {
+		return m.saveErr
+	}
 	m.sessions[id] = true
+	return nil
+}
+
+func (m *memSessions) DeleteSession(_ context.Context, id string) error {
+	delete(m.sessions, id)
 	return nil
 }
 
@@ -184,10 +194,75 @@ func TestAuth_GateRejectsForgedAndMissingCookies(t *testing.T) {
 
 	// Signed cookie for a session the store no longer has.
 	req3 := httptest.NewRequest(http.MethodGet, "/app", nil)
-	req3.AddCookie(&http.Cookie{Name: cookieName, Value: "ghost." + a.sign("ghost")})
+	req3.AddCookie(&http.Cookie{Name: cookieName, Value: "ghost." + a.sign("cookie", "ghost")})
 	rec3 := httptest.NewRecorder()
 	gated(rec3, req3)
 	if rec3.Code != http.StatusUnauthorized {
 		t.Fatalf("ghost session = %d", rec3.Code)
+	}
+}
+
+func TestAuth_ForgeryByExpiryTampering(t *testing.T) {
+	// THE attack HMAC exists for: stretch the expiry, keep the signature.
+	a, _ := testAuth()
+	token := tokenOf(t, a.MintLink())
+	parts := strings.SplitN(token, ".", 3)
+	tampered := parts[0] + ".9999999999." + parts[2]
+	rec := postLogin(a, tampered)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "non valido") {
+		t.Fatalf("expiry-tampered token = %d %q", rec.Code, rec.Body.String())
+	}
+	// Malformed shapes die too.
+	for _, bad := range []string{"", "a.b", "a.b.c.d"} {
+		if rec := postLogin(a, bad); rec.Code != http.StatusForbidden {
+			t.Errorf("malformed %q = %d", bad, rec.Code)
+		}
+	}
+}
+
+func TestAuth_SaveFailureSetsNoCookie(t *testing.T) {
+	a, sess := testAuth()
+	sess.saveErr = errors.New("firestore down")
+	rec := postLogin(a, tokenOf(t, a.MintLink()))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("save failure = %d, want 500", rec.Code)
+	}
+	if len(rec.Result().Cookies()) != 0 {
+		t.Fatal("cookie issued for an unsaved session")
+	}
+}
+
+func TestAuth_CookieAttributesPinned(t *testing.T) {
+	a, _ := testAuth()
+	rec := postLogin(a, tokenOf(t, a.MintLink()))
+	c := rec.Result().Cookies()[0]
+	if c.Path != "/app" || c.SameSite != http.SameSiteLaxMode || !c.HttpOnly || !c.Secure {
+		t.Fatalf("cookie attrs = %+v", c)
+	}
+}
+
+func TestAuth_LogoutRevokesServerSide(t *testing.T) {
+	a, sess := testAuth()
+	rec := postLogin(a, tokenOf(t, a.MintLink()))
+	cookie := rec.Result().Cookies()[0]
+
+	out := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/app/logout", nil)
+	req.AddCookie(cookie)
+	a.HandleLogout(out, req)
+	if out.Code != http.StatusSeeOther {
+		t.Fatalf("logout = %d", out.Code)
+	}
+	if len(sess.sessions) != 0 {
+		t.Fatal("session not revoked server-side (stolen cookie would survive)")
+	}
+	// The old cookie is now dead at the gate.
+	gated := a.Require(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+	req2 := httptest.NewRequest(http.MethodGet, "/app", nil)
+	req2.AddCookie(cookie)
+	rec2 := httptest.NewRecorder()
+	gated(rec2, req2)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("revoked cookie still passes = %d", rec2.Code)
 	}
 }

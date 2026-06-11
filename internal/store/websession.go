@@ -65,9 +65,23 @@ func (w *WebSessions) CheckSession(ctx context.Context, id string) (bool, error)
 	if err != nil {
 		return false, nil
 	}
-	if t, ok := exp.(time.Time); ok && time.Now().After(t) {
+	t, ok := exp.(time.Time)
+	if !ok {
+		// Corrupt doc: fail CLOSED, a session must never become eternal.
+		return false, nil
+	}
+	if time.Now().After(t) {
 		// TTL deletion is lazy (up to 24h): enforce expiry at read time.
 		return false, nil
 	}
 	return true, nil
+}
+
+// DeleteSession revokes a session (logout / kill switch).
+func (w *WebSessions) DeleteSession(ctx context.Context, id string) error {
+	_, err := w.client.Collection(webSessionsCollection).Doc(id).Delete(ctx)
+	if err != nil {
+		return fmt.Errorf("web session delete: %w", err)
+	}
+	return nil
 }

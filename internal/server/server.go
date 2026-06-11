@@ -12,8 +12,9 @@ type Deps struct {
 	Webhook  http.Handler // POST /telegram/webhook (M3)
 }
 
-// New builds the service handler.
-func New(deps Deps) http.Handler {
+// New builds the service mux; returned concrete so the composition root can
+// mount optional surfaces (dashboard) without type assertions.
+func New(deps Deps) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	if deps.Executor != nil {

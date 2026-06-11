@@ -117,12 +117,12 @@ type RuleCounter interface {
 // Converse handles one free-text athlete message end to end (Telegram path:
 // replies are sent through c.Out).
 func (c *Coach) Converse(ctx context.Context, text string) error {
-	reply, v, err := c.converse(ctx, text)
+	reply, v, degraded, err := c.converse(ctx, text)
 	if err != nil {
 		return err
 	}
-	if reply == "" {
-		return nil // degraded paths already sent their own message
+	if degraded != "" {
+		return c.Out.Send(ctx, degraded)
 	}
 	if err := c.Out.SendWithVerdict(ctx, reply, v); err != nil {
 		// The Opus run is CONSUMED: an error here would release the dedup
@@ -138,32 +138,33 @@ func (c *Coach) Converse(ctx context.Context, text string) error {
 // ConverseReply is the web-chat path: same pipeline (budget, tools, gate,
 // shared session), reply returned for rendering instead of sent.
 func (c *Coach) ConverseReply(ctx context.Context, text string) (string, verdict.Verdict, error) {
-	reply, v, err := c.converse(ctx, text)
+	reply, v, degraded, err := c.converse(ctx, text)
 	if err != nil {
 		return "", verdict.Verdict{}, err
 	}
-	if reply == "" {
-		return "", verdict.Verdict{}, fmt.Errorf("coach degradato: vedi Telegram per il dettaglio")
+	if degraded != "" {
+		// The honest degraded text goes to WHOEVER asked: no split-brain
+		// where the web sees a generic error and Telegram gets the truth.
+		return degraded, verdict.Verdict{}, nil
 	}
 	return reply, v, nil
 }
 
-// converse runs the shared pipeline; empty reply means a degraded path
-// already answered via c.Out.
-func (c *Coach) converse(ctx context.Context, text string) (string, verdict.Verdict, error) {
+// converse runs the shared pipeline. A non-empty degraded string means the
+// model could not answer and the CALLER must deliver it on its own channel.
+func (c *Coach) converse(ctx context.Context, text string) (reply string, v verdict.Verdict, degraded string, err error) {
 	// Decision 18, mechanically: when the daily deep-tier budget is spent,
 	// degrade honestly instead of burning Opus on a chatty day or a storm.
 	if c.Budget != nil {
 		today := c.Now().In(c.TZ).Format(dateOnly)
 		ok, err := c.Budget.Spend(ctx, today, maxDeepCallsPerDay)
 		if err != nil {
-			return "", verdict.Verdict{}, fmt.Errorf("coach: budget: %w", err)
+			return "", verdict.Verdict{}, "", fmt.Errorf("coach: budget: %w", err)
 		}
 		if !ok {
 			slog.Warn("coach: daily deep-tier budget exhausted", "date", today)
-			return "", verdict.Verdict{}, c.Out.Send(ctx,
-				"⚠️ Budget giornaliero del coach esaurito: riprendiamo domani. "+
-					"Per il quadro di oggi: /status.")
+			return "", verdict.Verdict{}, "⚠️ Budget giornaliero del coach esaurito: riprendiamo domani. " +
+				"Per il quadro di oggi: /status.", nil
 		}
 	}
 
@@ -171,8 +172,7 @@ func (c *Coach) converse(ctx context.Context, text string) (string, verdict.Verd
 	if err != nil {
 		// Honest degraded reply beats retry spam: the athlete asked NOW.
 		slog.Warn("coach: today context unavailable", "err", err)
-		return "", verdict.Verdict{}, c.Out.Send(ctx,
-			"⚠️ Non riesco a leggere i dati di oggi da intervals.icu in questo momento; riprova tra poco.")
+		return "", verdict.Verdict{}, "⚠️ Non riesco a leggere i dati di oggi da intervals.icu in questo momento; riprova tra poco.", nil
 	}
 
 	sessionID, history, carry := c.loadHistory(ctx)
@@ -217,13 +217,13 @@ func (c *Coach) converse(ctx context.Context, text string) (string, verdict.Verd
 	}, c.tools(sessionID, v, today))
 	if err != nil {
 		slog.Warn("coach: reply failed, degraded", "err", err)
-		return "", verdict.Verdict{}, c.Out.Send(ctx,
-			telegram.DegradedLLMDown()+"\n\nIl quadro deterministico di oggi:\n\n"+body+"\n\n"+verdict.RenderBlock(v))
+		return "", verdict.Verdict{}, telegram.DegradedLLMDown() +
+			"\n\nIl quadro deterministico di oggi:\n\n" + body + "\n\n" + verdict.RenderBlock(v), nil
 	}
 
-	reply := telegram.SanitizeNarrative(res.Text)
+	reply = telegram.SanitizeNarrative(res.Text)
 	c.persist(ctx, sessionID, text, reply)
-	return reply, v, nil
+	return reply, v, "", nil
 }
 
 // loadHistory returns the active session id (possibly ""), its replayable

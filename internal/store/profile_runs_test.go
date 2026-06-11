@@ -525,3 +525,70 @@ func TestInjuries_Lifecycle(t *testing.T) {
 		t.Fatalf("log entries = %d, %v; want >= 3", len(logs), err)
 	}
 }
+
+func TestWebSessions_FullLifecycle(t *testing.T) {
+	client := emulatorClient(t)
+	ws := NewWebSessions(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	nonce := fmt.Sprintf("n-%d", time.Now().UnixNano())
+
+	// Single-use semantics: first redemption wins, second fails closed.
+	ok, err := ws.RedeemNonce(ctx, nonce, 10*time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("first redeem = %v, %v", ok, err)
+	}
+	ok, err = ws.RedeemNonce(ctx, nonce, 10*time.Minute)
+	if err != nil || ok {
+		t.Fatalf("replay = %v, %v; want false (Create semantics)", ok, err)
+	}
+
+	// Concurrent redemption of ONE nonce: exactly one winner.
+	nonce2 := nonce + "-race"
+	wins := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			ok, _ := ws.RedeemNonce(ctx, nonce2, 10*time.Minute)
+			wins <- ok
+		}()
+	}
+	a, b := <-wins, <-wins
+	if a == b {
+		t.Fatalf("concurrent redemption: wins=%v,%v; want exactly one true", a, b)
+	}
+
+	// Session round trip, expiry at read time, revocation.
+	sid := fmt.Sprintf("s-%d", time.Now().UnixNano())
+	if err := ws.SaveSession(ctx, sid, time.Hour); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if ok, _ := ws.CheckSession(ctx, sid); !ok {
+		t.Fatal("fresh session rejected")
+	}
+	if ok, _ := ws.CheckSession(ctx, "ghost-id"); ok {
+		t.Fatal("unknown session accepted")
+	}
+	// Past expiry must fail at READ time (Firestore TTL is lazy ~24h).
+	expired := sid + "-old"
+	_, _ = client.Collection("web_sessions").Doc(expired).Set(ctx, map[string]any{
+		"created_at": time.Now().UTC().Add(-48 * time.Hour),
+		"expires_at": time.Now().UTC().Add(-time.Hour),
+	})
+	if ok, _ := ws.CheckSession(ctx, expired); ok {
+		t.Fatal("expired session accepted (read-time enforcement broken)")
+	}
+	// Corrupt expires_at type: fail CLOSED, never an eternal session.
+	corrupt := sid + "-corrupt"
+	_, _ = client.Collection("web_sessions").Doc(corrupt).Set(ctx, map[string]any{
+		"expires_at": "not-a-time",
+	})
+	if ok, _ := ws.CheckSession(ctx, corrupt); ok {
+		t.Fatal("corrupt session doc accepted (fail-open)")
+	}
+	if err := ws.DeleteSession(ctx, sid); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if ok, _ := ws.CheckSession(ctx, sid); ok {
+		t.Fatal("revoked session still valid")
+	}
+}
