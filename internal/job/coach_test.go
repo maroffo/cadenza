@@ -6,7 +6,6 @@ package job
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -305,7 +304,7 @@ func TestConverse_ProposalValidationRejectsHostileCap(t *testing.T) {
 		t.Fatal("confirmation sent for an invalid proposal")
 	}
 	// The validation failure flowed back to the model as a tool error.
-	raw := fmt.Sprintf("%s", llm.Requests[1].Raw)
+	raw := string(llm.Requests[1].Raw)
 	if !strings.Contains(raw, "is_error") {
 		t.Error("tool validation failure not surfaced as is_error")
 	}
