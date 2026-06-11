@@ -1,0 +1,12 @@
+{{template "head" .}}
+<h2>Coach</h2>
+<div id="thread">
+{{range .Turns}}{{if eq .Role "user"}}<div class="bubble-u">{{.Content}}</div>
+{{else}}<div class="bubble-a">{{.Content}}</div>{{end}}{{end}}
+</div>
+<form hx-post="/app/chat" hx-target="#thread" hx-swap="beforeend" hx-on::after-request="this.reset()" style="display:flex;gap:.5rem;margin:1rem 0">
+<input type="text" name="text" placeholder="Scrivi al coach…" style="flex:1" autocomplete="off">
+<input type="submit" value="Invia">
+</form>
+<small>Stessa sessione del bot Telegram: budget e protezioni identici.</small>
+{{template "foot" .}}

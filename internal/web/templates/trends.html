@@ -1,0 +1,22 @@
+{{template "head" .}}
+<h2>Trend (90 giorni)</h2>
+<div class="card"><div id="charts"></div></div>
+<script src="https://unpkg.com/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/uplot@1.6.30/dist/uPlot.min.css">
+<script>
+fetch('/app/trends.json').then(r=>r.json()).then(pts=>{
+  const x = pts.map(p=>new Date(p.date).getTime()/1000);
+  const mk = (title, series) => {
+    const el = document.createElement('div'); el.style.marginBottom='1.5rem';
+    document.getElementById('charts').appendChild(el);
+    new uPlot({title, width: el.clientWidth||700, height:200,
+      series:[{}, ...series.map(s=>({label:s.l, stroke:s.c, spanGaps:true}))],
+      axes:[{stroke:'#8a8f98',grid:{stroke:'#1f2731'}},{stroke:'#8a8f98',grid:{stroke:'#1f2731'}}]},
+      [x, ...series.map(s=>pts.map(p=>p[s.k]??null))], el);
+  };
+  mk('HRV / FC riposo', [{k:'hrv',l:'HRV',c:'#7fd962'},{k:'rhr',l:'FC riposo',c:'#f07178'}]);
+  mk('Readiness / Sonno (h)', [{k:'readiness',l:'Readiness',c:'#59c2ff'},{k:'sleep_h',l:'Sonno h',c:'#d2a6ff'}]);
+  mk('CTL / ATL / Rampa', [{k:'ctl',l:'CTL',c:'#7fd962'},{k:'atl',l:'ATL',c:'#ffb454'},{k:'ramp',l:'Rampa',c:'#f07178'}]);
+});
+</script>
+{{template "foot" .}}

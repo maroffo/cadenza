@@ -1,0 +1,10 @@
+{{template "head" .}}
+<h2>Infortuni aperti</h2>
+<table><tr><th>Zona</th><th>Dolore</th><th>Aperto</th><th>Ultimo feedback</th><th></th></tr>
+{{range .Open}}<tr><td>{{.BodyPart}}</td><td>{{.Pain}}/10</td>
+<td>{{.OpenedAt.Format "02/01"}}</td><td>{{if .LastFeedback}}{{.LastFeedback}}{{else}}—{{end}}</td>
+<td><form method="post" action="/app/injuries/resolve"><input type="hidden" name="id" value="{{.ID}}"><input type="submit" value="✅ Risolto"></form></td></tr>
+{{else}}<tr><td colspan="5"><small>Nessun infortunio aperto. 💪</small></td></tr>{{end}}
+</table>
+<div class="card"><small>Aprire un infortunio si fa parlando col coach (chat o Telegram): qui si chiude soltanto, perché allargare è una decisione tua.</small></div>
+{{template "foot" .}}

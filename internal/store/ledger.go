@@ -56,3 +56,21 @@ func (l *Ledger) Record(ctx context.Context, rec WriteRecord) error {
 	}
 	return nil
 }
+
+// RecentWrites lists the latest calendar writes for the dashboard.
+func (l *Ledger) RecentWrites(ctx context.Context, limit int) ([]WriteRecord, error) {
+	docs, err := l.client.Collection(ledgerCollection).
+		OrderBy("created_at", firestore.Desc).Limit(limit).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("ledger recent: %w", err)
+	}
+	out := make([]WriteRecord, 0, len(docs))
+	for _, d := range docs {
+		var rec WriteRecord
+		if err := d.DataTo(&rec); err != nil {
+			return nil, fmt.Errorf("ledger decode %s: %w", d.Ref.ID, err)
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
