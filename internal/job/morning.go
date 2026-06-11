@@ -291,12 +291,18 @@ func assemble(today string, days []icu.Wellness, baselines verdict.Baselines, ra
 
 func toVerdictDay(w icu.Wellness) verdict.Day {
 	return verdict.Day{
-		Date:      w.ID,
-		HRV:       w.HRV,
-		RestingHR: w.RestingHR,
-		SleepSecs: w.SleepSecs,
-		RampRate:  w.RampRate,
-		CTL:       w.CTL,
-		ATL:       w.ATL,
+		Date:       w.ID,
+		HRV:        w.HRV,
+		RestingHR:  w.RestingHR,
+		SleepSecs:  w.SleepSecs,
+		RampRate:   w.RampRate,
+		CTL:        w.CTL,
+		ATL:        w.ATL,
+		Readiness:  w.Readiness,
+		SleepScore: w.SleepScore,
+		SpO2:       w.SpO2,
+		Soreness:   w.Soreness,
+		Fatigue:    w.Fatigue,
+		InjuryFeel: w.Injury,
 	}
 }

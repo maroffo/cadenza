@@ -505,3 +505,100 @@ func TestRenderBlock_GoShowsMargins(t *testing.T) {
 		}
 	}
 }
+
+func fp(v float64) *float64 { return &v }
+
+func TestCompute_D32ConservativeSignals(t *testing.T) {
+	base := func() Day {
+		d := greenDay("2026-06-10")
+		return d
+	}
+	in := func(d Day) Input {
+		return Input{Today: d, Window: []Day{greenDay("2026-06-09")}, Baselines: baselines, RampCap: 4.0}
+	}
+
+	t.Run("all green signals stay GO with margins", func(t *testing.T) {
+		d := base()
+		d.Readiness, d.SleepScore, d.SpO2 = fp(86), fp(82), fp(96)
+		v := Compute(in(d), DefaultRules())
+		if v.Kind != Go {
+			t.Fatalf("Kind = %s (%+v)", v.Kind, v.Reasons)
+		}
+		labels := map[string]bool{}
+		for _, c := range v.Checks {
+			labels[c.Label] = true
+		}
+		for _, want := range []string{"readiness", "sleep score", "spO2"} {
+			if !labels[want] {
+				t.Errorf("margin %q missing from checks", want)
+			}
+		}
+	})
+
+	t.Run("low readiness modifies with zone cap", func(t *testing.T) {
+		d := base()
+		d.Readiness = fp(47) // his real May 15th
+		v := Compute(in(d), DefaultRules())
+		if v.Kind != Modify || v.Caps.MaxZone != 3 {
+			t.Fatalf("Kind=%s Caps=%+v, want MODIFY maxZ3", v.Kind, v.Caps)
+		}
+	})
+
+	t.Run("very low readiness skips", func(t *testing.T) {
+		d := base()
+		d.Readiness = fp(35)
+		if v := Compute(in(d), DefaultRules()); v.Kind != Skip {
+			t.Fatalf("Kind = %s, want SKIP", v.Kind)
+		}
+	})
+
+	t.Run("low spO2 escalates by severity", func(t *testing.T) {
+		d := base()
+		d.SpO2 = fp(91)
+		if v := Compute(in(d), DefaultRules()); v.Kind != Modify {
+			t.Fatalf("spO2 91 = %s, want MODIFY", v.Kind)
+		}
+		d.SpO2 = fp(88)
+		if v := Compute(in(d), DefaultRules()); v.Kind != Skip {
+			t.Fatalf("spO2 88 = %s, want SKIP (illness signal)", v.Kind)
+		}
+	})
+
+	t.Run("athlete-reported soreness and injury bite", func(t *testing.T) {
+		d := base()
+		so, inj := 3, 2
+		d.Soreness, d.InjuryFeel = &so, &inj
+		v := Compute(in(d), DefaultRules())
+		if v.Kind != Modify {
+			t.Fatalf("Kind = %s", v.Kind)
+		}
+		if v.Caps.MaxZone != 2 || v.Caps.MaxMinutes != 60 {
+			t.Fatalf("injury_feel caps = %+v, want Z2/60m", v.Caps)
+		}
+	})
+
+	t.Run("absent signals are silent, not gaps", func(t *testing.T) {
+		v := Compute(in(base()), DefaultRules())
+		if v.Kind != Go {
+			t.Fatalf("Kind = %s", v.Kind)
+		}
+		for _, g := range v.DataGaps {
+			for _, forbidden := range []string{"readiness", "spO2", "soreness"} {
+				if strings.Contains(g, forbidden) {
+					t.Errorf("sparse signal reported as gap: %q", g)
+				}
+			}
+		}
+	})
+
+	t.Run("conservative-only: signals never upgrade a bad verdict", func(t *testing.T) {
+		d := base()
+		low := 20.0
+		d.HRV = &low // way below threshold: MODIFY from the core rules
+		d.Readiness, d.SleepScore, d.SpO2 = fp(94), fp(93), fp(98)
+		v := Compute(in(d), DefaultRules())
+		if v.Kind == Go {
+			t.Fatal("perfect D32 signals upgraded a low-HRV day to GO")
+		}
+	})
+}
