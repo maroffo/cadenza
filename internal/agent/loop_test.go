@@ -21,7 +21,7 @@ func TestRun_PlainTextCompletes(t *testing.T) {
 	fake := fakes.NewAnthropic(fakes.Text{S: "Buongiorno, giornata verde."})
 	defer fake.Close()
 
-	out, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
 		Model:     "claude-haiku-4-5-20251001",
 		System:    "sei un coach",
 		UserText:  "dati di oggi: ...",
@@ -30,8 +30,11 @@ func TestRun_PlainTextCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if out != "Buongiorno, giornata verde." {
-		t.Errorf("out = %q", out)
+	if res.Text != "Buongiorno, giornata verde." {
+		t.Errorf("out = %q", res.Text)
+	}
+	if len(res.Transcript) != 2 {
+		t.Errorf("transcript turns = %d, want 2 (user + assistant, the M5 seam)", len(res.Transcript))
 	}
 	if len(fake.Requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(fake.Requests))
@@ -60,7 +63,7 @@ func TestRun_NoCacheControlOnCheapTier(t *testing.T) {
 
 func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	fake := fakes.NewAnthropic(
-		fakes.ToolUse{ID: "tu_1", Name: "get_recent_activities", Input: json.RawMessage(`{"days":3}`)},
+		fakes.Call("tu_1", "get_recent_activities", `{"days":3}`),
 		fakes.Text{S: "ieri hai corso facile, bene."},
 	)
 	defer fake.Close()
@@ -76,7 +79,7 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 			},
 		},
 	}
-	out, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
 		Model: "m", System: "s", UserText: "u", MaxTokens: 256,
 	}, tools)
 	if err != nil {
@@ -85,8 +88,8 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	if called != 1 {
 		t.Fatalf("tool called %d times, want 1", called)
 	}
-	if out != "ieri hai corso facile, bene." {
-		t.Errorf("out = %q", out)
+	if res.Text != "ieri hai corso facile, bene." {
+		t.Errorf("out = %q", res.Text)
 	}
 	// Second request must carry the tool_result for tu_1: a missing
 	// tool_result for any tool_use id makes the real API reject the call.
@@ -101,7 +104,7 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 
 func TestRun_ToolFailureBecomesIsError(t *testing.T) {
 	fake := fakes.NewAnthropic(
-		fakes.ToolUse{ID: "tu_2", Name: "boom", Input: json.RawMessage(`{}`)},
+		fakes.Call("tu_2", "boom", `{}`),
 		fakes.Text{S: "ok, faccio senza"},
 	)
 	defer fake.Close()
@@ -115,13 +118,13 @@ func TestRun_ToolFailureBecomesIsError(t *testing.T) {
 			},
 		},
 	}
-	out, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
 		Model: "m", System: "s", UserText: "u", MaxTokens: 256,
 	}, tools)
 	if err != nil {
 		t.Fatalf("Run: %v (tool failure must flow back as is_error, not abort)", err)
 	}
-	if out == "" {
+	if res.Text == "" {
 		t.Error("empty narrative after recoverable tool failure")
 	}
 	second, _ := json.Marshal(fake.Requests[1].Messages)
@@ -132,7 +135,7 @@ func TestRun_ToolFailureBecomesIsError(t *testing.T) {
 
 func TestRun_UnknownToolAnsweredWithIsError(t *testing.T) {
 	fake := fakes.NewAnthropic(
-		fakes.ToolUse{ID: "tu_3", Name: "not_registered", Input: json.RawMessage(`{}`)},
+		fakes.Call("tu_3", "not_registered", `{}`),
 		fakes.Text{S: "ok"},
 	)
 	defer fake.Close()
@@ -152,7 +155,7 @@ func TestRun_UnknownToolAnsweredWithIsError(t *testing.T) {
 func TestRun_IterationCapStopsRunaway(t *testing.T) {
 	script := make([]fakes.Scripted, 0, maxIterations+2)
 	for range maxIterations + 2 {
-		script = append(script, fakes.ToolUse{ID: "tu_n", Name: "ping", Input: json.RawMessage(`{}`)})
+		script = append(script, fakes.Call("tu_n", "ping", `{}`))
 	}
 	fake := fakes.NewAnthropic(script...)
 	defer fake.Close()
@@ -186,5 +189,171 @@ func TestRun_APIErrorSurfaces(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("API error swallowed; degraded mode depends on it surfacing")
+	}
+}
+
+func TestRun_PauseTurnResumesAndCountsAgainstCap(t *testing.T) {
+	fake := fakes.NewAnthropic(
+		fakes.Stop{Reason: "pause_turn", S: "sto pensando"},
+		fakes.Text{S: "fatto"},
+	)
+	defer fake.Close()
+
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Text != "fatto" {
+		t.Errorf("out = %q", res.Text)
+	}
+	if len(fake.Requests) != 2 {
+		t.Fatalf("requests = %d, want 2 (pause then resume)", len(fake.Requests))
+	}
+	// The resume must re-send the paused assistant content as-is.
+	second, _ := json.Marshal(fake.Requests[1].Messages)
+	if !strings.Contains(string(second), "sto pensando") {
+		t.Errorf("paused content not re-sent:\n%s", second)
+	}
+}
+
+func TestRun_RefusalErrorsWithoutRetry(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Stop{Reason: "refusal", S: "no"})
+	defer fake.Close()
+
+	_, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, nil)
+	if err == nil {
+		t.Fatal("refusal must surface as error (degraded fallback)")
+	}
+	if len(fake.Requests) != 1 {
+		t.Fatalf("requests = %d, want exactly 1 (never retry a refusal)", len(fake.Requests))
+	}
+}
+
+func TestRun_MaxTokensReturnsPartialText(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Stop{Reason: "max_tokens", S: "narrativa tronca"})
+	defer fake.Close()
+
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 16,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v (truncated beats silent)", err)
+	}
+	if res.Text != "narrativa tronca" || res.StopReason != "max_tokens" {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+func TestRun_EmptyEndTurnErrors(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Text{S: ""})
+	defer fake.Close()
+
+	if _, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, nil); err == nil {
+		t.Fatal("empty end_turn accepted; degraded mode depends on the error")
+	}
+}
+
+func TestRun_TransientOverloadRecoversViaSDKRetries(t *testing.T) {
+	// 529s are retryable: the SDK's built-in retries (2) must absorb a
+	// transient overload so 07:00 does not degrade unnecessarily.
+	fake := fakes.NewAnthropic(
+		fakes.HTTPErr{Status: 529},
+		fakes.HTTPErr{Status: 529},
+		fakes.Text{S: "ripreso"},
+	)
+	defer fake.Close()
+
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v (SDK retries must absorb transient 529s)", err)
+	}
+	if res.Text != "ripreso" {
+		t.Errorf("out = %q", res.Text)
+	}
+}
+
+func TestRun_ParallelToolCallsAllAnswered(t *testing.T) {
+	fake := fakes.NewAnthropic(
+		fakes.ToolUse{Calls: []fakes.ToolCall{
+			{ID: "tu_a", Name: "ok_tool", Input: json.RawMessage(`{}`)},
+			{ID: "tu_b", Name: "bad_tool", Input: json.RawMessage(`{}`)},
+		}},
+		fakes.Text{S: "fatto con entrambi"},
+	)
+	defer fake.Close()
+
+	tools := Tools{
+		"ok_tool": Tool{Description: "ok", Schema: json.RawMessage(`{"type":"object"}`),
+			Handler: func(context.Context, json.RawMessage) (string, error) { return "dati", nil }},
+		"bad_tool": Tool{Description: "bad", Schema: json.RawMessage(`{"type":"object"}`),
+			Handler: func(context.Context, json.RawMessage) (string, error) { return "", errors.New("boom") }},
+	}
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, tools)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Text == "" {
+		t.Error("empty text")
+	}
+	second, _ := json.Marshal(fake.Requests[1].Messages)
+	for _, want := range []string{"tu_a", "tu_b", `"is_error":true`} {
+		if !strings.Contains(string(second), want) {
+			t.Errorf("parallel tool_results missing %q:\n%s", want, second)
+		}
+	}
+}
+
+func TestRun_MalformedToolSchemaFailsLoudly(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Text{S: "never reached"})
+	defer fake.Close()
+
+	tools := Tools{"broken": Tool{Description: "x", Schema: json.RawMessage(`{not json`),
+		Handler: func(context.Context, json.RawMessage) (string, error) { return "", nil }}}
+	if _, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, tools); err == nil {
+		t.Fatal("malformed developer schema registered silently")
+	}
+	if len(fake.Requests) != 0 {
+		t.Fatal("request sent despite invalid tool schema")
+	}
+}
+
+func TestRun_ToolsSerializedInSortedOrder(t *testing.T) {
+	// Tools sit at position zero of the M5 cache prefix: map ordering would
+	// silently invalidate the cache on every call.
+	fake := fakes.NewAnthropic(fakes.Text{S: "ok"}, fakes.Text{S: "ok"})
+	defer fake.Close()
+
+	tools := Tools{}
+	for _, n := range []string{"zeta", "alpha", "mid"} {
+		tools[n] = Tool{Description: n, Schema: json.RawMessage(`{"type":"object"}`),
+			Handler: func(context.Context, json.RawMessage) (string, error) { return "", nil }}
+	}
+	for range 2 {
+		if _, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+			Model: "m", System: "s", UserText: "u", MaxTokens: 64,
+		}, tools); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
+	a, _ := json.Marshal(fake.Requests[0].Tools)
+	b, _ := json.Marshal(fake.Requests[1].Tools)
+	if string(a) != string(b) {
+		t.Fatal("tool serialization not deterministic across calls")
+	}
+	ia, im, iz := strings.Index(string(a), "alpha"), strings.Index(string(a), "mid"), strings.Index(string(a), "zeta")
+	if ia >= im || im >= iz {
+		t.Fatalf("tools not sorted: alpha@%d mid@%d zeta@%d", ia, im, iz)
 	}
 }

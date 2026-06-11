@@ -103,3 +103,17 @@ var tagRe = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
 func stripTags(s string) string {
 	return html.UnescapeString(tagRe.ReplaceAllString(s, ""))
 }
+
+var allowedTagRe = regexp.MustCompile(`^</?(b|i)>$`)
+
+// SanitizeNarrative enforces the model's markup contract in code: only
+// <b> and <i> survive; every other tag is stripped. The prompt asks for at
+// most one bold, but prompts are wishes and this is the guarantee.
+func SanitizeNarrative(s string) string {
+	return tagRe.ReplaceAllStringFunc(s, func(tag string) string {
+		if allowedTagRe.MatchString(tag) {
+			return tag
+		}
+		return ""
+	})
+}

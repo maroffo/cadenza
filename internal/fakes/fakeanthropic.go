@@ -6,6 +6,7 @@ package fakes
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -17,10 +18,22 @@ type Scripted interface{ isScripted() }
 // Text ends the turn with an assistant text block (stop_reason end_turn).
 type Text struct{ S string }
 
-// ToolUse asks for one tool call (stop_reason tool_use).
+// ToolUse asks for tool calls; multiple entries in one response model the
+// API's parallel tool use.
 type ToolUse struct {
+	Calls []ToolCall
+}
+
+type ToolCall struct {
 	ID, Name string
 	Input    json.RawMessage
+}
+
+// Stop ends the turn with an arbitrary stop_reason (pause_turn, refusal,
+// max_tokens) and optional text content.
+type Stop struct {
+	Reason string
+	S      string
 }
 
 // HTTPErr fails the request with a status code (e.g. 429, 529).
@@ -31,16 +44,23 @@ type HTTPErr struct {
 
 func (Text) isScripted()    {}
 func (ToolUse) isScripted() {}
+func (Stop) isScripted()    {}
 func (HTTPErr) isScripted() {}
 
-// CapturedRequest is the decoded body of one /v1/messages call.
+// Call makes single-tool scripting terse.
+func Call(id, name string, input string) ToolUse {
+	return ToolUse{Calls: []ToolCall{{ID: id, Name: name, Input: json.RawMessage(input)}}}
+}
+
+// CapturedRequest is the decoded body of one /v1/messages call. Raw carries
+// the full untouched body for whole-request scans (e.g. cache_control).
 type CapturedRequest struct {
 	Model     string            `json:"model"`
 	MaxTokens int               `json:"max_tokens"`
 	System    json.RawMessage   `json:"system"`
 	Messages  []json.RawMessage `json:"messages"`
 	Tools     []json.RawMessage `json:"tools"`
-	Raw       json.RawMessage   `json:"-"`
+	Raw       []byte            `json:"-"`
 }
 
 type Anthropic struct {
@@ -60,23 +80,20 @@ func NewAnthropic(script ...Scripted) *Anthropic {
 func (f *Anthropic) URL() string { return f.srv.URL }
 func (f *Anthropic) Close()      { f.srv.Close() }
 
-// Push appends more scripted responses (for multi-phase tests).
-func (f *Anthropic) Push(s ...Scripted) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.script = append(f.script, s...)
-}
-
 func (f *Anthropic) handle(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
 	var req CapturedRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
+	_ = json.Unmarshal(raw, &req)
+	req.Raw = raw
 
 	f.mu.Lock()
 	f.Requests = append(f.Requests, req)
 	if len(f.script) == 0 {
 		f.mu.Unlock()
-		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"api_error","message":"fakeanthropic: script exhausted"}}`)
+		// 400: terminal for the SDK (no retries), so a script bug fails the
+		// test fast instead of inflating request counts through backoff.
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"fakeanthropic: script exhausted"}}`)
 		return
 	}
 	next := f.script[0]
@@ -92,27 +109,38 @@ func (f *Anthropic) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		_, _ = fmt.Fprint(w, body)
 	case Text:
-		writeJSON(w, map[string]any{
-			"id": "msg_fake", "type": "message", "role": "assistant",
-			"model":       req.Model,
-			"content":     []any{map[string]any{"type": "text", "text": s.S}},
-			"stop_reason": "end_turn",
-			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 50},
-		})
+		f.writeMessage(w, req.Model, "end_turn", []any{textBlock(s.S)})
+	case Stop:
+		var content []any
+		if s.S != "" {
+			content = append(content, textBlock(s.S))
+		}
+		f.writeMessage(w, req.Model, s.Reason, content)
 	case ToolUse:
-		writeJSON(w, map[string]any{
-			"id": "msg_fake", "type": "message", "role": "assistant",
-			"model": req.Model,
-			"content": []any{map[string]any{
-				"type": "tool_use", "id": s.ID, "name": s.Name, "input": s.Input,
-			}},
-			"stop_reason": "tool_use",
-			"usage":       map[string]any{"input_tokens": 100, "output_tokens": 50},
-		})
+		content := make([]any, 0, len(s.Calls))
+		for _, c := range s.Calls {
+			content = append(content, map[string]any{
+				"type": "tool_use", "id": c.ID, "name": c.Name, "input": c.Input,
+			})
+		}
+		f.writeMessage(w, req.Model, "tool_use", content)
 	}
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func textBlock(s string) map[string]any {
+	return map[string]any{"type": "text", "text": s}
+}
+
+func (f *Anthropic) writeMessage(w http.ResponseWriter, model, stopReason string, content []any) {
+	if content == nil {
+		content = []any{}
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id": "msg_fake", "type": "message", "role": "assistant",
+		"model":       model,
+		"content":     content,
+		"stop_reason": stopReason,
+		"usage":       map[string]any{"input_tokens": 100, "output_tokens": 50},
+	})
 }

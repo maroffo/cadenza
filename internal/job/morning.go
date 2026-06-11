@@ -141,10 +141,15 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 
 	v := verdict.Compute(in, verdict.DefaultRules())
 	body := telegram.MorningBody(data)
-	full, status := m.narrate(ctx, today, body, v)
+	full, narrative, status := m.narrate(ctx, today, body, v)
 
 	if err := m.Out.SendWithVerdict(ctx, full, v); err != nil {
 		return fmt.Errorf("morning: send: %w", err)
+	}
+	// Persist only what was actually delivered: undelivered narratives must
+	// never surface as conversation history in M5.
+	if narrative != "" {
+		m.persistExchange(ctx, body, narrative)
 	}
 	if err := m.Runs.MarkMorningCompleted(ctx, today, status); err != nil {
 		// The message went out; each retry resends until the mark sticks,
@@ -157,21 +162,22 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 // narrate wraps the deterministic body with the coach prose. Narrative
 // failure NEVER fails the morning: the athlete gets the raw numbers and the
 // verdict with an honest notice (decision 16), and the run records degraded.
-func (m Morning) narrate(ctx context.Context, today, body string, v verdict.Verdict) (full, status string) {
+func (m Morning) narrate(ctx context.Context, today, body string, v verdict.Verdict) (full, narrative, status string) {
 	if m.Narrator == nil {
-		return body, string(v.Kind)
+		return body, "", string(v.Kind)
 	}
-	narrative, err := m.Narrator.MorningNarrative(ctx, agent.NarrativeInput{
+	raw, err := m.Narrator.MorningNarrative(ctx, agent.NarrativeInput{
 		Date: today, Body: body, Verdict: v,
 	})
 	if err != nil {
 		// Warn, not Error: the athlete still gets a message; the email
 		// alert (severity>=ERROR) is reserved for silent mornings.
 		slog.Warn("morning: narrative failed, sending degraded", "err", err)
-		return telegram.DegradedLLMDown() + "\n\n" + body, string(v.Kind) + "-degraded"
+		return telegram.DegradedLLMDown() + "\n\n" + body, "", string(v.Kind) + "-degraded"
 	}
-	m.persistExchange(ctx, body, narrative)
-	return narrative + "\n\n" + body, string(v.Kind)
+	// Markup contract enforced in code: prompts are wishes (decision 15 doctrine).
+	narrative = telegram.SanitizeNarrative(raw)
+	return narrative + "\n\n" + body, narrative, string(v.Kind)
 }
 
 // persistExchange records the morning as a session; best-effort by design.

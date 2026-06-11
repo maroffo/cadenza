@@ -261,8 +261,23 @@ func TestMorningPath_WithNarrative(t *testing.T) {
 	if len(llm.Requests) != 1 {
 		t.Fatalf("llm calls = %d, want 1", len(llm.Requests))
 	}
-	if strings.Contains(string(llm.Requests[0].System), "cache_control") {
-		t.Error("cache_control on the cheap tier")
+	if strings.Contains(string(llm.Requests[0].Raw), "cache_control") {
+		t.Error("cache_control on the cheap tier (scanned the whole request)")
+	}
+
+	// Session persistence is not write-only theatre: read it back.
+	sessDocs, err := fsClient.Collection("sessions").Documents(ctx).GetAll()
+	if err != nil || len(sessDocs) != 1 {
+		t.Fatalf("sessions = %d, %v; want 1", len(sessDocs), err)
+	}
+	sessions := store.NewSessions(fsClient)
+	turns, err := sessions.LoadTurns(ctx, sessDocs[0].Ref.ID)
+	if err != nil {
+		t.Fatalf("LoadTurns: %v", err)
+	}
+	if len(turns) != 2 || turns[0].Role != "user" || turns[1].Role != "assistant" ||
+		turns[1].Model != "claude-haiku-test" || !strings.HasPrefix(turns[1].Content, "Sei fresco") {
+		t.Errorf("persisted exchange wrong: %+v", turns)
 	}
 }
 

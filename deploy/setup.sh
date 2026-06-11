@@ -52,9 +52,11 @@ say "Firestore (Native, ${REGION})"
 if ! gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
   gcloud firestore databases create --location="$REGION" --type=firestore-native
 fi
-say "Firestore TTL policy on dedup.expires_at"
+say "Firestore TTL policies (dedup 7d-style cleanup, session turns 18m retention)"
 gcloud firestore fields ttls update expires_at \
   --collection-group=dedup --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=turns --enable-ttl --async || true
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"

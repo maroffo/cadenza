@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -51,20 +53,33 @@ type Request struct {
 	MaxTokens int
 }
 
-// Run executes the tool loop and returns the final assistant text.
-func Run(ctx context.Context, c Client, req Request, tools Tools) (string, error) {
+// Result is what a loop run produces. Transcript carries the full exchange
+// (user turns, assistant turns, tool results) so M5 can persist and resume
+// conversations without a signature break.
+type Result struct {
+	Text       string
+	StopReason string
+	Transcript []anthropic.MessageParam
+}
+
+// Run executes the tool loop.
+func Run(ctx context.Context, c Client, req Request, tools Tools) (Result, error) {
+	tp, err := toolParams(tools)
+	if err != nil {
+		return Result{}, err
+	}
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(req.Model),
 		MaxTokens: int64(req.MaxTokens),
 		System:    []anthropic.TextBlockParam{{Text: req.System}},
 		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(req.UserText))},
-		Tools:     toolParams(tools),
+		Tools:     tp,
 	}
 
 	for range maxIterations {
 		resp, err := c.api.Messages.New(ctx, params)
 		if err != nil {
-			return "", fmt.Errorf("agent: messages: %w", err)
+			return Result{}, fmt.Errorf("agent: messages: %w", err)
 		}
 
 		switch resp.StopReason {
@@ -76,17 +91,27 @@ func Run(ctx context.Context, c Client, req Request, tools Tools) (string, error
 			params.Messages = append(params.Messages, resp.ToParam())
 		case anthropic.StopReasonRefusal:
 			// Never auto-retry a refusal; the caller falls back deterministically.
-			return "", fmt.Errorf("agent: model refused the request")
+			return Result{}, fmt.Errorf("agent: model refused the request")
 		default:
 			// end_turn or max_tokens: take whatever text we have.
+			if resp.StopReason == anthropic.StopReasonMaxTokens {
+				// Truncation must be visible: the athlete would otherwise get
+				// a mid-sentence message with no signal anywhere.
+				slog.Warn("agent: response truncated at max_tokens", "model", req.Model)
+			}
 			text := collectText(resp)
 			if text == "" {
-				return "", fmt.Errorf("agent: empty response (stop_reason %s)", resp.StopReason)
+				return Result{}, fmt.Errorf("agent: empty response (stop_reason %s)", resp.StopReason)
 			}
-			return text, nil
+			params.Messages = append(params.Messages, resp.ToParam())
+			return Result{
+				Text:       text,
+				StopReason: string(resp.StopReason),
+				Transcript: params.Messages,
+			}, nil
 		}
 	}
-	return "", fmt.Errorf("agent: iteration cap (%d) reached, aborting loop", maxIterations)
+	return Result{}, fmt.Errorf("agent: iteration cap (%d) reached, aborting loop", maxIterations)
 }
 
 func collectText(resp *anthropic.Message) string {
@@ -125,17 +150,25 @@ func toolResults(ctx context.Context, resp *anthropic.Message, tools Tools) []an
 	return results
 }
 
-func toolParams(tools Tools) []anthropic.ToolUnionParam {
+// toolParams serializes the registry in SORTED name order: tools sit at
+// position zero of the future cache prefix, and a map-ordered list would
+// silently invalidate the M5 cache on every call.
+func toolParams(tools Tools) ([]anthropic.ToolUnionParam, error) {
 	if len(tools) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]anthropic.ToolUnionParam, 0, len(tools))
-	for name, t := range tools {
+	for _, name := range slices.Sorted(maps.Keys(tools)) {
+		t := tools[name]
 		var schema struct {
 			Properties any      `json:"properties"`
 			Required   []string `json:"required"`
 		}
-		_ = json.Unmarshal(t.Schema, &schema)
+		if err := json.Unmarshal(t.Schema, &schema); err != nil {
+			// Schemas are developer-authored constants: a malformed one must
+			// fail loudly, not register a tool the model free-forms inputs for.
+			return nil, fmt.Errorf("agent: tool %q schema: %w", name, err)
+		}
 		tp := anthropic.ToolParam{
 			Name:        name,
 			Description: anthropic.String(t.Description),
@@ -146,5 +179,5 @@ func toolParams(tools Tools) []anthropic.ToolUnionParam {
 		}
 		out = append(out, anthropic.ToolUnionParam{OfTool: &tp})
 	}
-	return out
+	return out, nil
 }

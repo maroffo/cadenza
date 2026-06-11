@@ -163,6 +163,22 @@ func TestSessions_RoundTripAndCorruptionFallback(t *testing.T) {
 	if len(turns) != 2 || turns[0].Role != "user" || turns[1].Model != "haiku" {
 		t.Errorf("turns = %+v", turns)
 	}
+	if turns[0].ExpiresAt.IsZero() {
+		t.Error("turn without ExpiresAt: the retention TTL policy has nothing to act on")
+	}
+
+	// Ordering is a query contract, not an insertion accident: append a
+	// lower seq AFTER higher ones and verify LoadTurns still sorts.
+	if err := s.AppendTurn(ctx, id, 0, "user", "prima", ""); err != nil {
+		t.Fatalf("AppendTurn 0: %v", err)
+	}
+	turns, err = s.LoadTurns(ctx, id)
+	if err != nil {
+		t.Fatalf("LoadTurns: %v", err)
+	}
+	if len(turns) != 3 || turns[0].Seq != 0 || turns[2].Seq != 2 {
+		t.Errorf("ordering broken: %+v", turns)
+	}
 
 	// Corrupt a turn by hand (wrong schema): load must FAIL loudly so the
 	// caller starts a fresh session instead of trusting partial history.

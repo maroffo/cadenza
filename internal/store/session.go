@@ -1,5 +1,5 @@
 // ABOUTME: Session store: cadenza-owned turn schema in a subcollection, never raw SDK JSON.
-// ABOUTME: Any load failure degrades to a fresh session (decision 11); turns capped per session.
+// ABOUTME: Any load failure degrades to a fresh session (decision 11); retention via TTL field.
 
 package store
 
@@ -43,11 +43,18 @@ type Turn struct {
 	Model   string    `firestore:"model,omitempty"`
 	TS      time.Time `firestore:"ts"`
 	Schema  int       `firestore:"schema"`
+	// ExpiresAt drives the Firestore TTL policy: health-adjacent personal
+	// data does not live forever by accident (18 months).
+	ExpiresAt time.Time `firestore:"expires_at"`
 }
+
+// turnRetention bounds how long narrative/health content persists.
+const turnRetention = 18 * 30 * 24 * time.Hour
 
 // Create opens a session and returns its id.
 func (s *Sessions) Create(ctx context.Context, mode string, now time.Time) (string, error) {
-	id := fmt.Sprintf("s-%s-%s", mode, now.UTC().Format("20060102-150405"))
+	// UnixNano avoids collisions at 1-second granularity (forced re-runs).
+	id := fmt.Sprintf("s-%s-%d", mode, now.UTC().UnixNano())
 	_, err := s.client.Collection(sessionsCollection).Doc(id).Set(ctx, sessionDoc{
 		Mode: mode, StartedAt: now.UTC(), Schema: sessionSchemaVersion,
 	})
@@ -59,9 +66,10 @@ func (s *Sessions) Create(ctx context.Context, mode string, now time.Time) (stri
 
 // AppendTurn persists one turn with a zero-padded sequence id.
 func (s *Sessions) AppendTurn(ctx context.Context, sessionID string, seq int, role, content, model string) error {
+	now := time.Now().UTC()
 	turn := Turn{
 		Seq: seq, Role: role, Content: content, Model: model,
-		TS: time.Now().UTC(), Schema: sessionSchemaVersion,
+		TS: now, Schema: sessionSchemaVersion, ExpiresAt: now.Add(turnRetention),
 	}
 	doc := s.client.Collection(sessionsCollection).Doc(sessionID).
 		Collection(turnsSubcollection).Doc(fmt.Sprintf("%06d", seq))
@@ -97,7 +105,10 @@ func (s *Sessions) LoadTurns(ctx context.Context, sessionID string) ([]Turn, err
 		if err := snap.DataTo(&t); err != nil {
 			return nil, fmt.Errorf("session decode (turn %s): %w", snap.Ref.ID, err)
 		}
-		if t.Schema != sessionSchemaVersion {
+		// Reject only NEWER schemas: older turns stay readable so additive
+		// bumps never orphan existing history (the version is for breaking
+		// changes a rollback might encounter).
+		if t.Schema > sessionSchemaVersion {
 			return nil, fmt.Errorf("session schema %d unsupported (turn %s)", t.Schema, snap.Ref.ID)
 		}
 		turns = append(turns, t)

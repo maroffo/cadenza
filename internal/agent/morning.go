@@ -63,8 +63,15 @@ func (n Narrator) MorningNarrative(ctx context.Context, in NarrativeInput) (stri
 		}
 		fmt.Fprintf(&u, "- margine %s: %s (%s) [%s]\n", c.Label, c.Observed, c.Limit, state)
 	}
-	if v := in.Verdict.Caps; v.MaxZone != 0 || v.MaxMinutes != 0 {
-		fmt.Fprintf(&u, "Limiti di oggi: max Z%d, max %d minuti\n", v.MaxZone, v.MaxMinutes)
+	if caps := in.Verdict.Caps; caps.MaxZone != 0 || caps.MaxMinutes != 0 {
+		parts := []string{}
+		if caps.MaxZone != 0 {
+			parts = append(parts, fmt.Sprintf("max Z%d", caps.MaxZone))
+		}
+		if caps.MaxMinutes != 0 {
+			parts = append(parts, fmt.Sprintf("max %d minuti", caps.MaxMinutes))
+		}
+		fmt.Fprintf(&u, "Limiti di oggi: %s\n", strings.Join(parts, ", "))
 	}
 	if len(in.Verdict.DataGaps) > 0 {
 		fmt.Fprintf(&u, "Dati mancanti: %s\n", strings.Join(in.Verdict.DataGaps, ", "))
@@ -73,10 +80,14 @@ func (n Narrator) MorningNarrative(ctx context.Context, in NarrativeInput) (stri
 
 	// Decision 10: NO cache_control on this tier; a single-shot 07:00 call
 	// has nothing reading the cache within the TTL.
-	return Run(ctx, n.Client, Request{
+	res, err := Run(ctx, n.Client, Request{
 		Model:     n.Model,
 		System:    morningSystem,
 		UserText:  u.String(),
 		MaxTokens: 1024,
 	}, nil)
+	if err != nil {
+		return "", err
+	}
+	return res.Text, nil
 }

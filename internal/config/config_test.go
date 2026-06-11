@@ -32,6 +32,19 @@ func TestLoad_DevDefaults(t *testing.T) {
 	if cfg.AthleteTZ != "Europe/Rome" {
 		t.Errorf("AthleteTZ = %q, want Europe/Rome", cfg.AthleteTZ)
 	}
+	if cfg.ModelCheap != "claude-haiku-4-5-20251001" {
+		t.Errorf("ModelCheap default = %q", cfg.ModelCheap)
+	}
+}
+
+func TestLoad_ModelCheapOverride(t *testing.T) {
+	cfg, err := Load(env(map[string]string{"MODEL_CHEAP": "claude-haiku-9"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ModelCheap != "claude-haiku-9" {
+		t.Errorf("ModelCheap = %q, want override", cfg.ModelCheap)
+	}
 }
 
 func TestLoad_ExplicitOverrides(t *testing.T) {

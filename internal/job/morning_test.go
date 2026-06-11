@@ -531,7 +531,10 @@ func (s *stubSessions) Create(_ context.Context, mode string, _ time.Time) (stri
 }
 
 func (s *stubSessions) AppendTurn(_ context.Context, _ string, seq int, role, content, model string) error {
-	s.turns = append(s.turns, fmt.Sprintf("%d:%s", seq, role))
+	if s.err != nil {
+		return s.err
+	}
+	s.turns = append(s.turns, fmt.Sprintf("%d:%s:%s:%s", seq, role, content[:min(8, len(content))], model))
 	return nil
 }
 
@@ -560,8 +563,11 @@ func TestMorning_NarrativePrependedAndSessionRecorded(t *testing.T) {
 	if len(sess.created) != 1 || sess.created[0] != "morning" {
 		t.Errorf("session not created: %+v", sess.created)
 	}
-	if len(sess.turns) != 2 || sess.turns[0] != "1:user" || sess.turns[1] != "2:assistant" {
-		t.Errorf("turns = %v, want [1:user 2:assistant]", sess.turns)
+	if len(sess.turns) != 2 ||
+		!strings.HasPrefix(sess.turns[0], "1:user:") ||
+		!strings.HasPrefix(sess.turns[1], "2:assistant:Giornata") ||
+		!strings.HasSuffix(sess.turns[1], ":claude-haiku-test") {
+		t.Errorf("turns = %v, want narrative content and model stamped", sess.turns)
 	}
 }
 
@@ -616,5 +622,56 @@ func TestMorning_SessionFailureNeverBlocksSend(t *testing.T) {
 	}
 	if runs.completed["2026-06-10"] != "GO" {
 		t.Errorf("status = %q, want GO (not degraded: narrative succeeded)", runs.completed["2026-06-10"])
+	}
+}
+
+type flakyTurnSessions struct {
+	stubSessions
+	failTurn int
+}
+
+func (f *flakyTurnSessions) AppendTurn(ctx context.Context, id string, seq int, role, content, model string) error {
+	if seq == f.failTurn {
+		return errors.New("firestore hiccup")
+	}
+	return f.stubSessions.AppendTurn(ctx, id, seq, role, content, model)
+}
+
+func TestMorning_TurnFailureAfterCreateNeverBlocksSend(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	sess := &flakyTurnSessions{failTurn: 1}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: "ok narrativa"}
+	m.Sessions = sess
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("send lost to a turn failure")
+	}
+	if runs.completed["2026-06-10"] != "GO" {
+		t.Errorf("status = %q, want GO", runs.completed["2026-06-10"])
+	}
+	if len(sess.turns) != 0 {
+		t.Errorf("turn 2 written after turn 1 failed: %v (partial history)", sess.turns)
+	}
+}
+
+func TestMorning_NarrativeSanitized(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: `Vai <b>forte</b> <a href="http://x">qui</a>`}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(out.bodies[0], "<a") {
+		t.Errorf("model markup not sanitized:\n%s", out.bodies[0])
+	}
+	if !strings.Contains(out.bodies[0], "<b>forte</b>") {
+		t.Errorf("allowed markup lost:\n%s", out.bodies[0])
 	}
 }
