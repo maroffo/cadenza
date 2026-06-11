@@ -421,3 +421,28 @@ func TestBudget_SpendCapsAtLimit(t *testing.T) {
 		t.Fatal("4th call allowed past a limit of 3 (decision 18 not mechanical)")
 	}
 }
+
+func TestLedger_RecordUpsertsByExternalID(t *testing.T) {
+	client := emulatorClient(t)
+	l := NewLedger(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ext := fmt.Sprintf("cadenza-2099-01-01-%d", time.Now().UnixNano())
+
+	if err := l.Record(ctx, WriteRecord{Date: "2099-01-01", ExternalID: ext, Status: "unverified_surfaced", Attempts: 3}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	// Retry overwrites its own audit line, no duplicates.
+	if err := l.Record(ctx, WriteRecord{Date: "2099-01-01", ExternalID: ext, Status: "verified", Attempts: 1}); err != nil {
+		t.Fatalf("Record retry: %v", err)
+	}
+	snap, err := client.Collection("events_written").Doc(ext).Get(ctx)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	var rec WriteRecord
+	_ = snap.DataTo(&rec)
+	if rec.Status != "verified" {
+		t.Errorf("status = %q, want overwritten to verified", rec.Status)
+	}
+}
