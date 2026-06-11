@@ -38,6 +38,7 @@ Pre-work done: requirements refined (7 decisions), 11-agent verified research (`
 | 23 | Profile seed | Hybrid: script computes baselines from icu wellness 30/60d + sport settings; YAML for goals/injuries/medical/patterns | Reality-grounded baselines, minimal typing | Never |
 | 24 | Infra tool | Idempotent `deploy/setup.sh` (gcloud, describe-before-create), no Terraform | ~15 one-time resources, 1 env, no state babysitting; commands = runbook | 2nd env/service |
 | 25 | Spec drift | Revise system prompt WORKOUT DELIVERY section: DSL mechanics moved to renderer; prompt says "emit structured steps via tool" | Stale rules waste cached tokens, instruct dead write path | n/a |
+| 26 | Workout write path (supersedes the DSL-only assumption in 12) | JSON-first: structured steps marshal into workout_doc (hr_zone units), external_id upsert for idempotency, read-back resolve=true diff unchanged; DSL renderer demoted to fallback | Live spikes 2026-06-11: upsert works under API key; JSON steps accepted AND server-resolved (_hr bpm); bare DSL zone tokens resolve as POWER (trap) | Checkpoint shows JSON path renders/syncs poorly on watch/UI |
 
 ## Module layout (module github.com/maroffo/cadenza, Go 1.24+)
 
@@ -121,8 +122,8 @@ Save plan to vault (`Plans/2026-06-10 - cadenza MVP`); annotation cycle (complex
 
 ## Unresolved questions
 
-1. Upsert semantics under API-key auth (spike 3; default GET-then-PUT).
-2. workout_doc direct write path exists? (assume no; DSL is the path; revisit if spike 4 shows otherwise.)
+1. Upsert semantics under API-key auth (spike 3; default GET-then-PUT). RISOLTO 2026-06-11: upsert via external_id FUNZIONA sotto API key (stesso id, update in place). Vedi quality_reports/research/2026-06-11_icu-spikes.md.
+2. workout_doc direct write path exists? (assume no; DSL is the path; revisit if spike 4 shows otherwise.) RISOLTO 2026-06-11: ESISTE e risolve i target (_hr bpm). Decisione 26: JSON-first, DSL fallback. Trappola scoperta: token zona nudi nel DSL risolvono come POWER.
 3. HRV reliably synced by 07:00? (burn-in data decides; retry mitigates.)
 4. MAx actions needed before M2: create GCP project billing OK, BotFather bots, provide icu API key + Anthropic key for Secret Manager.
 5. Vault note name OK as `Plans/2026-06-10 - cadenza MVP`?
