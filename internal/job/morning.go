@@ -12,11 +12,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/telegram"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
+
+// MorningNarrator produces the coaching prose; satisfied by agent.Narrator.
+// Nil keeps the deterministic skeleton (and IS the degraded mode).
+type MorningNarrator interface {
+	MorningNarrative(ctx context.Context, in agent.NarrativeInput) (string, error)
+}
+
+// SessionStore persists exchanges in the cadenza-owned schema (decision 11).
+type SessionStore interface {
+	Create(ctx context.Context, mode string, now time.Time) (string, error)
+	AppendTurn(ctx context.Context, sessionID string, seq int, role, content, model string) error
+}
 
 // WellnessSource provides typed wellness days for a date range (inclusive).
 type WellnessSource interface {
@@ -60,8 +73,13 @@ type Morning struct {
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
-	Now   func() time.Time
-	TZ    *time.Location
+	// Narrator adds the M4 prose; nil = deterministic skeleton only.
+	Narrator MorningNarrator
+	// Sessions records the exchange; nil or failing never blocks the send.
+	Sessions  SessionStore
+	ModelName string
+	Now       func() time.Time
+	TZ        *time.Location
 }
 
 // morningPayload travels in retry envelopes; the Scheduler's static body has
@@ -122,15 +140,63 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	}
 
 	v := verdict.Compute(in, verdict.DefaultRules())
-	if err := m.Out.SendWithVerdict(ctx, telegram.MorningBody(data), v); err != nil {
+	body := telegram.MorningBody(data)
+	full, narrative, status := m.narrate(ctx, today, body, v)
+
+	if err := m.Out.SendWithVerdict(ctx, full, v); err != nil {
 		return fmt.Errorf("morning: send: %w", err)
 	}
-	if err := m.Runs.MarkMorningCompleted(ctx, today, string(v.Kind)); err != nil {
+	// Persist only what was actually delivered: undelivered narratives must
+	// never surface as conversation history in M5.
+	if narrative != "" {
+		m.persistExchange(ctx, body, narrative)
+	}
+	if err := m.Runs.MarkMorningCompleted(ctx, today, status); err != nil {
 		// The message went out; each retry resends until the mark sticks,
 		// bounded by the caller's max-attempts (accepted trade-off).
 		return fmt.Errorf("morning: mark completed: %w", err)
 	}
 	return nil
+}
+
+// narrate wraps the deterministic body with the coach prose. Narrative
+// failure NEVER fails the morning: the athlete gets the raw numbers and the
+// verdict with an honest notice (decision 16), and the run records degraded.
+func (m Morning) narrate(ctx context.Context, today, body string, v verdict.Verdict) (full, narrative, status string) {
+	if m.Narrator == nil {
+		return body, "", string(v.Kind)
+	}
+	raw, err := m.Narrator.MorningNarrative(ctx, agent.NarrativeInput{
+		Date: today, Body: body, Verdict: v,
+	})
+	if err != nil {
+		// Warn, not Error: the athlete still gets a message; the email
+		// alert (severity>=ERROR) is reserved for silent mornings.
+		slog.Warn("morning: narrative failed, sending degraded", "err", err)
+		return telegram.DegradedLLMDown() + "\n\n" + body, "", string(v.Kind) + "-degraded"
+	}
+	// Markup contract enforced in code: prompts are wishes (decision 15 doctrine).
+	narrative = telegram.SanitizeNarrative(raw)
+	return narrative + "\n\n" + body, narrative, string(v.Kind)
+}
+
+// persistExchange records the morning as a session; best-effort by design.
+func (m Morning) persistExchange(ctx context.Context, userContext, narrative string) {
+	if m.Sessions == nil {
+		return
+	}
+	id, err := m.Sessions.Create(ctx, "morning", m.Now())
+	if err != nil {
+		slog.Warn("morning: session create failed", "err", err)
+		return
+	}
+	if err := m.Sessions.AppendTurn(ctx, id, 1, "user", userContext, ""); err != nil {
+		slog.Warn("morning: session turn failed", "err", err)
+		return
+	}
+	if err := m.Sessions.AppendTurn(ctx, id, 2, "assistant", narrative, m.ModelName); err != nil {
+		slog.Warn("morning: session turn failed", "err", err)
+	}
 }
 
 // Compose builds the morning body and verdict without side effects. The

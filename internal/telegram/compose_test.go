@@ -134,3 +134,19 @@ func TestSplitMessage_MultibyteSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeNarrative_AllowlistOnly(t *testing.T) {
+	in := `Oggi <b>spingi</b> con <i>criterio</i>. <a href="https://evil.example">link</a> <script>x</script><u>sotto</u>`
+	out := SanitizeNarrative(in)
+	if !strings.Contains(out, "<b>spingi</b>") || !strings.Contains(out, "<i>criterio</i>") {
+		t.Errorf("allowed tags stripped: %q", out)
+	}
+	for _, forbidden := range []string{"<a", "<script", "<u>"} {
+		if strings.Contains(out, forbidden) {
+			t.Errorf("forbidden tag survived: %q in %q", forbidden, out)
+		}
+	}
+	if !strings.Contains(out, "link") {
+		t.Errorf("inner text lost: %q", out)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"github.com/go-telegram/bot"
 
+	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/config"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/job"
@@ -176,6 +177,15 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Retry:    retry,
 		Now:      time.Now,
 		TZ:       tz,
+	}
+	// M4: the coach voice. No key (dev without LLM) = skeleton mode.
+	if cfg.AnthropicAPIKey != "" {
+		morning.Narrator = agent.Narrator{
+			Client: agent.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL),
+			Model:  cfg.ModelCheap,
+		}
+		morning.Sessions = store.NewSessions(fsClient)
+		morning.ModelName = cfg.ModelCheap
 	}
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
 	message := job.Message{

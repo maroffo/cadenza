@@ -51,6 +51,14 @@
 - Run it twice → second run logs "already completed, no-op", no duplicate message.
 - `gcloud scheduler jobs pause cadenza-morning`, wait for 07:15 next day → watchdog message + alert email. Unpause.
 
+## Secret rotation
+
+Secrets are referenced by PINNED version: rotation = add a new version
+(`gcloud secrets versions add <name> --data-file=-`), bump the `:N` in
+`deploy.yml` via PR, merge (deploys), then disable the old version
+(`gcloud secrets versions disable`). Deliberate friction: a leaked-key
+rotation is an auditable change, not a silent flip.
+
 ## Notes
 
 - The service is `--allow-unauthenticated` because Telegram webhooks cannot do OIDC; `/internal/execute` does its own in-app OIDC (audience + invoker email).

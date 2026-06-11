@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/verdict"
@@ -499,5 +501,177 @@ func TestDispatch_MorningAttemptFromPayload(t *testing.T) {
 	bad := task.Envelope{V: 1, Type: task.TypeMorningCheck, ID: "x", Payload: json.RawMessage(`{broken`)}
 	if err := d.Dispatch(context.Background(), bad); !errors.Is(err, task.ErrPoison) {
 		t.Fatalf("err = %v, want ErrPoison", err)
+	}
+}
+
+type stubNarrator struct {
+	out string
+	err error
+}
+
+func (s stubNarrator) MorningNarrative(_ context.Context, in agent.NarrativeInput) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.out, nil
+}
+
+type stubSessions struct {
+	created []string
+	turns   []string
+	err     error
+}
+
+func (s *stubSessions) Create(_ context.Context, mode string, _ time.Time) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	s.created = append(s.created, mode)
+	return "s-test-1", nil
+}
+
+func (s *stubSessions) AppendTurn(_ context.Context, _ string, seq int, role, content, model string) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.turns = append(s.turns, fmt.Sprintf("%d:%s:%s:%s", seq, role, content[:min(8, len(content))], model))
+	return nil
+}
+
+func TestMorning_NarrativePrependedAndSessionRecorded(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	sess := &stubSessions{}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: "Giornata verde, corri sereno."}
+	m.Sessions = sess
+	m.ModelName = "claude-haiku-test"
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	msg := out.bodies[0]
+	if !strings.HasPrefix(msg, "Giornata verde") {
+		t.Errorf("narrative not prepended:\n%s", msg)
+	}
+	if !strings.Contains(msg, "Check mattutino") {
+		t.Errorf("deterministic body lost:\n%s", msg)
+	}
+	if runs.completed["2026-06-10"] != "GO" {
+		t.Errorf("status = %q, want GO", runs.completed["2026-06-10"])
+	}
+	if len(sess.created) != 1 || sess.created[0] != "morning" {
+		t.Errorf("session not created: %+v", sess.created)
+	}
+	if len(sess.turns) != 2 ||
+		!strings.HasPrefix(sess.turns[0], "1:user:") ||
+		!strings.HasPrefix(sess.turns[1], "2:assistant:Giornata") ||
+		!strings.HasSuffix(sess.turns[1], ":claude-haiku-test") {
+		t.Errorf("turns = %v, want narrative content and model stamped", sess.turns)
+	}
+}
+
+func TestMorning_NarratorFailureDegradesNeverSilent(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{err: errors.New("anthropic 529")}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v (LLM failure must never fail the morning)", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1 (degraded, not silent)", len(out.bodies))
+	}
+	if !strings.Contains(out.bodies[0], "Coach offline") {
+		t.Errorf("degraded notice missing:\n%s", out.bodies[0])
+	}
+	if !strings.Contains(out.bodies[0], "Check mattutino") {
+		t.Errorf("raw numbers missing in degraded message:\n%s", out.bodies[0])
+	}
+	if runs.completed["2026-06-10"] != "GO-degraded" {
+		t.Errorf("status = %q, want GO-degraded", runs.completed["2026-06-10"])
+	}
+}
+
+func TestMorning_NilNarratorKeepsSkeleton(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.HasPrefix(out.bodies[0], "☀️") {
+		t.Errorf("skeleton message changed:\n%s", out.bodies[0])
+	}
+}
+
+func TestMorning_SessionFailureNeverBlocksSend(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: "ok"}
+	m.Sessions = &stubSessions{err: errors.New("firestore down")}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v (session persistence is best-effort)", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("message lost to a session-store failure")
+	}
+	if runs.completed["2026-06-10"] != "GO" {
+		t.Errorf("status = %q, want GO (not degraded: narrative succeeded)", runs.completed["2026-06-10"])
+	}
+}
+
+type flakyTurnSessions struct {
+	stubSessions
+	failTurn int
+}
+
+func (f *flakyTurnSessions) AppendTurn(ctx context.Context, id string, seq int, role, content, model string) error {
+	if seq == f.failTurn {
+		return errors.New("firestore hiccup")
+	}
+	return f.stubSessions.AppendTurn(ctx, id, seq, role, content, model)
+}
+
+func TestMorning_TurnFailureAfterCreateNeverBlocksSend(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	sess := &flakyTurnSessions{failTurn: 1}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: "ok narrativa"}
+	m.Sessions = sess
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("send lost to a turn failure")
+	}
+	if runs.completed["2026-06-10"] != "GO" {
+		t.Errorf("status = %q, want GO", runs.completed["2026-06-10"])
+	}
+	if len(sess.turns) != 0 {
+		t.Errorf("turn 2 written after turn 1 failed: %v (partial history)", sess.turns)
+	}
+}
+
+func TestMorning_NarrativeSanitized(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Narrator = stubNarrator{out: `Vai <b>forte</b> <a href="http://x">qui</a>`}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(out.bodies[0], "<a") {
+		t.Errorf("model markup not sanitized:\n%s", out.bodies[0])
+	}
+	if !strings.Contains(out.bodies[0], "<b>forte</b>") {
+		t.Errorf("allowed markup lost:\n%s", out.bodies[0])
 	}
 }

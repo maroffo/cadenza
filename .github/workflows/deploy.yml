@@ -57,3 +57,4 @@ jobs:
             TELEGRAM_BOT_TOKEN=cadenza-telegram-bot-token:1
             TELEGRAM_WEBHOOK_SECRET=cadenza-telegram-webhook-secret:1
             ICU_API_KEY=cadenza-icu-api-key:1
+            ANTHROPIC_API_KEY=cadenza-anthropic-api-key:1

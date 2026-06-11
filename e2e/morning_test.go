@@ -20,6 +20,8 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/go-telegram/bot"
 
+	"github.com/maroffo/cadenza/internal/agent"
+	"github.com/maroffo/cadenza/internal/fakes"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/job"
 	"github.com/maroffo/cadenza/internal/server"
@@ -195,5 +197,147 @@ func TestMorningPath_EndToEnd(t *testing.T) {
 	_ = resp.Body.Close()
 	if sink.count() != 1 {
 		t.Fatalf("watchdog sent despite completed morning: messages = %d", sink.count())
+	}
+}
+
+func TestMorningPath_WithNarrative(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		if os.Getenv("REQUIRE_EMULATOR") == "1" {
+			t.Fatal("REQUIRE_EMULATOR=1 but FIRESTORE_EMULATOR_HOST is not set")
+		}
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tz := time.FixedZone("Europe/Rome", 2*3600)
+	now := func() time.Time { return time.Date(2031, 4, 7, 7, 0, 0, 0, tz) }
+	today := "2031-04-07"
+
+	icuSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `[{"id":"%s","hrv":70,"restingHR":46,"sleepSecs":27000,"ctl":41.0,"atl":45.0,"rampRate":2.0}]`, today)
+	}))
+	defer icuSrv.Close()
+	sink := &telegramSink{}
+	tgSrv := httptest.NewServer(http.HandlerFunc(sink.handler))
+	defer tgSrv.Close()
+	llm := fakes.NewAnthropic(fakes.Text{S: "Sei fresco: giornata da sfruttare, resta dentro i range."})
+	defer llm.Close()
+
+	fsClient, err := firestore.NewClient(ctx, fmt.Sprintf("cadenza-e2e-m4-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("firestore: %v", err)
+	}
+	defer func() { _ = fsClient.Close() }()
+	profiles := store.NewProfiles(fsClient)
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 68, HRVSD: 6, RestingHR: 47}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tgBot, _ := bot.New("e2e", bot.WithServerURL(tgSrv.URL), bot.WithSkipGetMe())
+
+	morning := job.Morning{
+		Wellness:  job.ICU{C: icu.New(icuSrv.URL, "k", "0")},
+		Profiles:  profiles,
+		Out:       telegram.NewSender(tgBot, 1),
+		Runs:      store.NewRuns(fsClient),
+		Narrator:  agent.Narrator{Client: agent.NewClient("k", llm.URL()), Model: "claude-haiku-test"},
+		Sessions:  store.NewSessions(fsClient),
+		ModelName: "claude-haiku-test",
+		Now:       now,
+		TZ:        tz,
+	}
+	if err := morning.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	sink.mu.Lock()
+	text := sink.texts[0]
+	sink.mu.Unlock()
+	if !strings.HasPrefix(text, "Sei fresco") {
+		t.Errorf("narrative not first:\n%s", text)
+	}
+	if !strings.Contains(text, "VERDETTO") || !strings.Contains(text, "Margini") {
+		t.Errorf("code-owned verdict block missing:\n%s", text)
+	}
+	if len(llm.Requests) != 1 {
+		t.Fatalf("llm calls = %d, want 1", len(llm.Requests))
+	}
+	if strings.Contains(string(llm.Requests[0].Raw), "cache_control") {
+		t.Error("cache_control on the cheap tier (scanned the whole request)")
+	}
+
+	// Session persistence is not write-only theatre: read it back.
+	sessDocs, err := fsClient.Collection("sessions").Documents(ctx).GetAll()
+	if err != nil || len(sessDocs) != 1 {
+		t.Fatalf("sessions = %d, %v; want 1", len(sessDocs), err)
+	}
+	sessions := store.NewSessions(fsClient)
+	turns, err := sessions.LoadTurns(ctx, sessDocs[0].Ref.ID)
+	if err != nil {
+		t.Fatalf("LoadTurns: %v", err)
+	}
+	if len(turns) != 2 || turns[0].Role != "user" || turns[1].Role != "assistant" ||
+		turns[1].Model != "claude-haiku-test" || !strings.HasPrefix(turns[1].Content, "Sei fresco") {
+		t.Errorf("persisted exchange wrong: %+v", turns)
+	}
+}
+
+func TestMorningPath_DegradedWhenLLMDown(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		if os.Getenv("REQUIRE_EMULATOR") == "1" {
+			t.Fatal("REQUIRE_EMULATOR=1 but FIRESTORE_EMULATOR_HOST is not set")
+		}
+		t.Skip("FIRESTORE_EMULATOR_HOST not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	tz := time.FixedZone("Europe/Rome", 2*3600)
+	now := func() time.Time { return time.Date(2031, 4, 8, 7, 0, 0, 0, tz) }
+	today := "2031-04-08"
+
+	icuSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `[{"id":"%s","hrv":70,"restingHR":46,"sleepSecs":27000,"ctl":41.0,"atl":45.0,"rampRate":2.0}]`, today)
+	}))
+	defer icuSrv.Close()
+	sink := &telegramSink{}
+	tgSrv := httptest.NewServer(http.HandlerFunc(sink.handler))
+	defer tgSrv.Close()
+	// Hard 400s: terminal for the SDK, no retries; narrative fails fast.
+	llm := fakes.NewAnthropic(fakes.HTTPErr{Status: 400}, fakes.HTTPErr{Status: 400}, fakes.HTTPErr{Status: 400})
+	defer llm.Close()
+
+	fsClient, err := firestore.NewClient(ctx, fmt.Sprintf("cadenza-e2e-m4d-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("firestore: %v", err)
+	}
+	defer func() { _ = fsClient.Close() }()
+	profiles := store.NewProfiles(fsClient)
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 68, HRVSD: 6, RestingHR: 47}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tgBot, _ := bot.New("e2e", bot.WithServerURL(tgSrv.URL), bot.WithSkipGetMe())
+
+	runs := store.NewRuns(fsClient)
+	morning := job.Morning{
+		Wellness: job.ICU{C: icu.New(icuSrv.URL, "k", "0")},
+		Profiles: profiles,
+		Out:      telegram.NewSender(tgBot, 1),
+		Runs:     runs,
+		Narrator: agent.Narrator{Client: agent.NewClient("k", llm.URL()), Model: "claude-haiku-test"},
+		Now:      now,
+		TZ:       tz,
+	}
+	if err := morning.Run(ctx); err != nil {
+		t.Fatalf("Run: %v (LLM down must degrade, not fail)", err)
+	}
+	sink.mu.Lock()
+	text := sink.texts[0]
+	sink.mu.Unlock()
+	if !strings.Contains(text, "Coach offline") || !strings.Contains(text, "VERDETTO") {
+		t.Errorf("degraded message malformed:\n%s", text)
+	}
+	done, err := runs.MorningCompleted(ctx, today)
+	if err != nil || !done {
+		t.Fatalf("degraded run not completed: %v %v", done, err)
 	}
 }

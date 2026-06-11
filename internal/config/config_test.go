@@ -32,6 +32,19 @@ func TestLoad_DevDefaults(t *testing.T) {
 	if cfg.AthleteTZ != "Europe/Rome" {
 		t.Errorf("AthleteTZ = %q, want Europe/Rome", cfg.AthleteTZ)
 	}
+	if cfg.ModelCheap != "claude-haiku-4-5-20251001" {
+		t.Errorf("ModelCheap default = %q", cfg.ModelCheap)
+	}
+}
+
+func TestLoad_ModelCheapOverride(t *testing.T) {
+	cfg, err := Load(env(map[string]string{"MODEL_CHEAP": "claude-haiku-9"}))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ModelCheap != "claude-haiku-9" {
+		t.Errorf("ModelCheap = %q, want override", cfg.ModelCheap)
+	}
 }
 
 func TestLoad_ExplicitOverrides(t *testing.T) {
@@ -76,6 +89,7 @@ func completeProdEnv() map[string]string {
 		"EXECUTOR_AUDIENCE":       "https://cadenza.example.run.app",
 		"INVOKER_EMAIL":           "cadenza-invoker@p.iam.gserviceaccount.com",
 		"TASKS_QUEUE_PATH":        "projects/p/locations/europe-west1/queues/cadenza-exec",
+		"ANTHROPIC_API_KEY":       "a",
 	}
 }
 
@@ -84,6 +98,7 @@ func TestLoad_ProdRequirements(t *testing.T) {
 		"GCP_PROJECT", "ICU_API_KEY", "TELEGRAM_BOT_TOKEN",
 		"TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",
 		"EXECUTOR_AUDIENCE", "INVOKER_EMAIL", "TASKS_QUEUE_PATH",
+		"ANTHROPIC_API_KEY",
 	} {
 		t.Run("missing "+missing+" rejected", func(t *testing.T) {
 			m := completeProdEnv()
