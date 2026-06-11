@@ -53,7 +53,9 @@ type Event struct {
 // Activity is the trimmed view cadenza exposes to tools: full payloads are
 // huge and would poison the model context (mvilanova lesson).
 type Activity struct {
-	ID             int64    `json:"id"`
+	// ID is a STRING in the intervals.icu API ("i86384921"), unlike event
+	// ids which are numeric. Decoding it as int64 breaks the whole list.
+	ID             string   `json:"id"`
 	StartDateLocal string   `json:"start_date_local"`
 	Type           string   `json:"type"`
 	Name           *string  `json:"name"`

@@ -230,3 +230,32 @@ func TestDecodeEvents_Malformed(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeActivities_RealisticPayload(t *testing.T) {
+	// Activity ids are strings with an "i" prefix in the live API: the
+	// coach's get_recent_activities tool died on int64 here (live bug).
+	raw := json.RawMessage(`[{
+		"id": "i86384921", "start_date_local": "2026-06-09T07:12:00",
+		"type": "Run", "name": "Morning Run",
+		"moving_time": 2700, "distance": 8400.5,
+		"icu_training_load": 35, "average_heartrate": 142
+	}, {
+		"id": "i86384950", "start_date_local": "2026-06-10T18:00:00",
+		"type": "Ride", "name": null,
+		"moving_time": null, "distance": null,
+		"icu_training_load": null, "average_heartrate": null
+	}]`)
+	acts, err := DecodeActivities(raw)
+	if err != nil {
+		t.Fatalf("DecodeActivities: %v", err)
+	}
+	if len(acts) != 2 || acts[0].ID != "i86384921" {
+		t.Fatalf("acts = %+v", acts)
+	}
+	if acts[0].TrainingLoad == nil || *acts[0].TrainingLoad != 35 {
+		t.Errorf("training load lost: %+v", acts[0])
+	}
+	if acts[1].Name != nil || acts[1].MovingTime != nil {
+		t.Errorf("nulls must stay nil, not zero: %+v", acts[1])
+	}
+}
