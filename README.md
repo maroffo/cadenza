@@ -32,7 +32,7 @@ Telegram ──webhook──▶ ┌───────────────
                       │  Cloud Run service "cadenza" │
 Cloud Scheduler ────▶ │  /telegram/webhook (enqueue) │ ──▶ intervals.icu REST
  (07:00 morning,      │  /internal/execute (OIDC)    │ ──▶ Anthropic Claude API
-  07:15 watchdog,     │  /healthz                    │ ──▶ Telegram Bot API
+  07:15 watchdog,     │  /health                    │ ──▶ Telegram Bot API
   12:00 reconcile)    └──────────────┬───────────────┘
 Cloud Tasks ◀─── named timers ───────┘
    │                                 │
@@ -61,7 +61,7 @@ internal/
   config/           env-based configuration, fail-fast in prod
   icu/              intervals.icu REST client (Basic auth, rate limit, retry)
                     + typed pointer-field models (a missing HRV is nil, never 0)
-  server/           HTTP surface: /healthz now; webhook + executor in M2/M3
+  server/           HTTP surface: /health now; webhook + executor in M2/M3
   store/            Firestore repositories; dedup is the at-least-once backbone
 e2e/                end-to-end tests (-tags=e2e)
 deploy/             (M2) idempotent gcloud bootstrap + runbook
