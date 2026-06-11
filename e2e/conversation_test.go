@@ -202,6 +202,19 @@ func TestConversation_EndToEnd(t *testing.T) {
 	if !strings.Contains(string(second.Raw), "come sto messo oggi?") {
 		t.Error("first user message not in history")
 	}
+	// Byte-stability is the actual cache precondition: same system+tools
+	// prefix bytes on both requests, or every read becomes a write.
+	var req1, req2 struct {
+		System json.RawMessage   `json:"system"`
+		Tools  []json.RawMessage `json:"tools"`
+	}
+	_ = json.Unmarshal(llm.Requests[0].Raw, &req1)
+	_ = json.Unmarshal(second.Raw, &req2)
+	t1, _ := json.Marshal(req1.Tools)
+	t2, _ := json.Marshal(req2.Tools)
+	if string(req1.System) != string(req2.System) || string(t1) != string(t2) {
+		t.Error("cached prefix not byte-stable across requests (cache would never hit)")
+	}
 
 	// 3) Pattern statement: the coach proposes a rule, confirm button arrives.
 	post(msg(8003, "dopo i voli sono a pezzi"))
@@ -227,6 +240,12 @@ func TestConversation_EndToEnd(t *testing.T) {
 	rules, err := store.NewRules(fsClient).ActiveTexts(ctx)
 	if err != nil || len(rules) != 1 {
 		t.Fatalf("active rules = %v, %v; want the confirmed one", rules, err)
+	}
+	sink.mu.Lock()
+	lastText := sink.texts[len(sink.texts)-1]
+	sink.mu.Unlock()
+	if !strings.Contains(lastText, "Salvato nel profilo") {
+		t.Errorf("athlete feedback missing after confirm: %q", lastText)
 	}
 
 	// 5) Next message: the confirmed rule is in the cached profile prefix.

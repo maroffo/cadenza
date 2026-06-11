@@ -449,3 +449,15 @@ func TestMessage_MalformedMutationCallbackIgnored(t *testing.T) {
 		t.Errorf("malformed callbacks resolved: %v", res.resolved)
 	}
 }
+
+func TestMessage_FreeTextRoutesToCoachNilKeepsNotice(t *testing.T) {
+	// Coach nil: the honest notice survives as the fallback.
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	if err := m.Run(context.Background(), envelopeFor(t, 51, msgPayload("ciao coach", allowedID))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "prossima versione") {
+		t.Errorf("fallback notice missing: %v", out.plain)
+	}
+}

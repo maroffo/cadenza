@@ -179,6 +179,12 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 	if id, approve, ok := parseMutationCallback(u.CallbackQuery.Data); ok && m.Muts != nil {
 		mut, err := m.Muts.Resolve(ctx, id, approve)
 		if err != nil {
+			if errors.Is(err, store.ErrMutationInvalid) {
+				// Terminal: stale button, wiped data, bad stored value.
+				// Retrying the tap cannot fix it; tell the athlete instead.
+				slog.Warn("message: invalid mutation callback", "id", id, "err", err)
+				return m.Out.Send(ctx, "⚠️ Proposta non più valida (scaduta o non trovata).")
+			}
 			return fmt.Errorf("message: mutation resolve: %w", err)
 		}
 		switch mut.Status {
@@ -187,6 +193,8 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 				"\nAttivo dalla prossima conversazione.")
 		case "rejected":
 			return m.Out.Send(ctx, "👍 Scartata, il profilo resta com'era.")
+		case "expired":
+			return m.Out.Send(ctx, "⏰ Proposta scaduta (oltre 48h): riproponila se serve ancora.")
 		default:
 			return m.Out.Send(ctx, "Già gestita in precedenza ("+mut.Status+").")
 		}

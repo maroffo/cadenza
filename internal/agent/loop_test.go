@@ -45,24 +45,6 @@ func TestRun_PlainTextCompletes(t *testing.T) {
 		t.Errorf("model = %q", fake.Requests[0].Model)
 	}
 }
-
-func TestRun_NoCacheControlOnCheapTier(t *testing.T) {
-	// Decision 10: no caching on Haiku; nothing reads the cache within the
-	// TTL of a single-shot 07:00 run.
-	fake := fakes.NewAnthropic(fakes.Text{S: "ok"})
-	defer fake.Close()
-
-	_, err := Run(context.Background(), newTestClient(fake.URL()), Request{
-		Model: "claude-haiku-4-5-20251001", System: "s", UserText: "u", MaxTokens: 128,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if strings.Contains(string(fake.Requests[0].System), "cache_control") {
-		t.Error("cache_control present on the cheap tier")
-	}
-}
-
 func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	fake := fakes.NewAnthropic(
 		fakes.Call("tu_1", "get_recent_activities", `{"days":3}`),
@@ -410,7 +392,7 @@ func TestRun_CheapTierStaysClean(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	raw := string(fake.Requests[0].Raw)
-	for _, forbidden := range []string{"cache_control", "thinking", "output_config"} {
+	for _, forbidden := range []string{`"cache_control"`, `"thinking":{`, `"output_config":`} {
 		if strings.Contains(raw, forbidden) {
 			t.Errorf("cheap tier request contains %q:\n%s", forbidden, raw)
 		}
@@ -457,5 +439,37 @@ func TestRun_UsageCaptured(t *testing.T) {
 	}
 	if res.Usage.InputTokens != 100 || res.Usage.OutputTokens != 50 {
 		t.Errorf("usage = %+v, want fake's 100/50", res.Usage)
+	}
+}
+
+func TestRun_ThinkingPreservedAcrossToolContinuation(t *testing.T) {
+	// Production config is Thinking+tools together: the API REQUIRES the
+	// thinking block replayed verbatim when the loop continues after tools.
+	fake := fakes.NewAnthropic(
+		fakes.ToolUse{
+			Thinking: "ragionamento-interno-da-replicare",
+			Calls:    []fakes.ToolCall{{ID: "tu_t", Name: "ping", Input: json.RawMessage(`{}`)}},
+		},
+		fakes.Text{S: "fatto"},
+	)
+	defer fake.Close()
+
+	tools := Tools{"ping": Tool{Description: "p", Schema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(context.Context, string, json.RawMessage) (string, error) { return "pong", nil }}}
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 256, Thinking: true,
+	}, tools)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Text != "fatto" {
+		t.Errorf("text = %q", res.Text)
+	}
+	second := string(fake.Requests[1].Raw)
+	if !strings.Contains(second, "ragionamento-interno-da-replicare") {
+		t.Errorf("thinking block not replayed on continuation:\n%s", second)
+	}
+	if !strings.Contains(second, "fake-sig") {
+		t.Errorf("thinking signature not replayed (API rejects without it)")
 	}
 }

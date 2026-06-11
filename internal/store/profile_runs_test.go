@@ -333,3 +333,91 @@ func TestChats_ActiveSessionPointer(t *testing.T) {
 		t.Fatalf("re-/start kept stale session %q, want reset", got)
 	}
 }
+
+func TestMutations_ConcurrentTapsSingleTerminalStatus(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	profiles := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 35, HRVSD: 8, RestingHR: 54}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	id := MutationID("s-race", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	if err := muts.Propose(ctx, id, Mutation{Kind: MutationRampCap, NewValue: "3.0"}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+
+	results := make(chan string, 2)
+	for _, approve := range []bool{true, false} {
+		go func(a bool) {
+			m, err := muts.Resolve(ctx, id, a)
+			if err != nil {
+				results <- "err:" + err.Error()
+				return
+			}
+			results <- m.Status
+		}(approve)
+	}
+	a, b := <-results, <-results
+	if a != b {
+		t.Fatalf("divergent terminal statuses: %q vs %q (transaction must serialize taps)", a, b)
+	}
+}
+
+func TestRules_ActiveTextsStableOrdering(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	rules := NewRules(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	for i := range 3 {
+		id := MutationID("s-ord", fmt.Sprintf("tu-%d-%d", time.Now().UnixNano(), i))
+		text := fmt.Sprintf("Regola ordinamento %d %d", i, time.Now().UnixNano())
+		if err := muts.Propose(ctx, id, Mutation{Kind: MutationRule, NewValue: text}); err != nil {
+			t.Fatalf("Propose: %v", err)
+		}
+		if _, err := muts.Resolve(ctx, id, true); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+	}
+	first, err := rules.ActiveTexts(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTexts: %v", err)
+	}
+	second, err := rules.ActiveTexts(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTexts: %v", err)
+	}
+	if len(first) < 3 {
+		t.Fatalf("rules = %d, want >= 3", len(first))
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("ordering not stable at %d: %q vs %q (cache prefix would churn)", i, first[i], second[i])
+		}
+	}
+}
+
+func TestBudget_SpendCapsAtLimit(t *testing.T) {
+	client := emulatorClient(t)
+	b := NewBudget(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	date := fmt.Sprintf("2099-budget-%d", time.Now().UnixNano())
+
+	for i := range 3 {
+		ok, err := b.Spend(ctx, date, 3)
+		if err != nil || !ok {
+			t.Fatalf("Spend %d = %v, %v; want allowed", i, ok, err)
+		}
+	}
+	ok, err := b.Spend(ctx, date, 3)
+	if err != nil {
+		t.Fatalf("Spend over: %v", err)
+	}
+	if ok {
+		t.Fatal("4th call allowed past a limit of 3 (decision 18 not mechanical)")
+	}
+}
