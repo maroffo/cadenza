@@ -47,6 +47,8 @@ jobs:
             TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
             EXECUTOR_AUDIENCE=${{ secrets.SERVICE_URL }}
             INVOKER_EMAIL=cadenza-invoker@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com
+            TASKS_QUEUE_PATH=projects/${{ secrets.GCP_PROJECT }}/locations/europe-west1/queues/cadenza-exec
           secrets: |
             TELEGRAM_BOT_TOKEN=cadenza-telegram-bot-token:1
+            TELEGRAM_WEBHOOK_SECRET=cadenza-telegram-webhook-secret:1
             ICU_API_KEY=cadenza-icu-api-key:1

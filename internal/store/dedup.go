@@ -61,3 +61,14 @@ func (d *Dedup) Reserve(ctx context.Context, key string, ttl time.Duration) (boo
 	}
 	return true, nil
 }
+
+// Release frees a reservation so a redelivery can claim it again. Used to
+// compensate when work fails AFTER Reserve: without it, the retry would hit
+// the reservation and silently drop the side effect forever.
+func (d *Dedup) Release(ctx context.Context, key string) error {
+	if !validDedupKey.MatchString(key) {
+		return fmt.Errorf("dedup: invalid key %q", key)
+	}
+	_, err := d.client.Collection(dedupCollection).Doc(key).Delete(ctx)
+	return err
+}

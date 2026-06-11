@@ -41,7 +41,8 @@ type telegramSink struct {
 }
 
 func (s *telegramSink) handler(w http.ResponseWriter, r *http.Request) {
-	if strings.HasSuffix(r.URL.Path, "/sendMessage") {
+	switch {
+	case strings.HasSuffix(r.URL.Path, "/sendMessage"):
 		var text string
 		ct := r.Header.Get("Content-Type")
 		switch {
@@ -56,8 +57,13 @@ func (s *telegramSink) handler(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.texts = append(s.texts, text)
 		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+	case strings.HasSuffix(r.URL.Path, "/answerCallbackQuery"):
+		// The Bot API returns a bare bool here, not a message object.
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": true})
+	default:
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
 }
 
 func (s *telegramSink) count() int {
