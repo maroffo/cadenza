@@ -5,6 +5,7 @@ package icu
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -257,5 +258,74 @@ func TestDecodeActivities_RealisticPayload(t *testing.T) {
 	}
 	if acts[1].Name != nil || acts[1].MovingTime != nil {
 		t.Errorf("nulls must stay nil, not zero: %+v", acts[1])
+	}
+}
+
+func TestWellness_FullSurfaceDecodeAndCompactMarshal(t *testing.T) {
+	// D31: full read, compact write. Nulls must vanish from the marshaled
+	// tool payload, not flood the model context as "field": null.
+	raw := json.RawMessage(`[{
+		"id": "2026-06-11", "hrv": 42, "restingHR": 59, "sleepSecs": 24480,
+		"kcalConsumed": 2350, "protein": 132.5, "carbohydrates": 240.0,
+		"fatTotal": 78.2, "hydration": 2.1, "bloodGlucose": 92.5,
+		"steps": 8421, "vo2max": 52.3, "mood": 2, "comments": "gambe pesanti",
+		"REMSleep": 1.4, "DeepSleep": 0.9, "respiration": 14.2,
+		"tempWeight": 71.3,
+		"weight": null, "spO2": null, "lactate": null
+	}]`)
+	days, err := DecodeWellnessRange(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	d := days[0]
+	if d.KcalConsumed == nil || *d.KcalConsumed != 2350 {
+		t.Errorf("kcal lost: %+v", d)
+	}
+	if d.BloodGlucose == nil || *d.BloodGlucose != 92.5 {
+		t.Errorf("glucose lost")
+	}
+	if d.Protein == nil || *d.Protein != 132.5 || d.Carbohydrates == nil || d.FatTotal == nil {
+		t.Errorf("macros lost: %+v", d)
+	}
+	if d.REMSleep == nil || d.TempWeight == nil {
+		t.Errorf("sleep phases / interpolated weight lost")
+	}
+	if d.Comments == nil || *d.Comments != "gambe pesanti" {
+		t.Errorf("athlete comments lost")
+	}
+	if d.Weight != nil || d.SpO2 != nil {
+		t.Errorf("nulls must stay nil")
+	}
+
+	out, _ := json.Marshal(d)
+	for _, forbidden := range []string{"weight", "spO2", "lactate", "null"} {
+		if strings.Contains(string(out), forbidden) {
+			t.Errorf("compact marshal leaked %q:\n%s", forbidden, out)
+		}
+	}
+	for _, want := range []string{"kcalConsumed", "protein", "carbohydrates", "hydration", "comments"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("marshal missing %q", want)
+		}
+	}
+}
+
+func TestActivity_AnalyticsDecode(t *testing.T) {
+	raw := json.RawMessage(`[{
+		"id": "i1", "start_date_local": "2026-06-09T07:00:00", "type": "Run",
+		"icu_intensity": 0.71, "icu_efficiency_factor": 1.42,
+		"decoupling": 3.8, "icu_hr_zone_times": [1200, 1500, 300, 0, 0],
+		"calories": 540
+	}]`)
+	acts, err := DecodeActivities(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	a := acts[0]
+	if a.Intensity == nil || *a.Intensity != 0.71 || len(a.HRZoneTimes) != 5 {
+		t.Errorf("analytics lost: %+v", a)
+	}
+	if a.HRZoneTimes[1] != 1500 {
+		t.Errorf("zone times wrong: %v", a.HRZoneTimes)
 	}
 }
