@@ -128,3 +128,4 @@ Save plan to vault (`Plans/2026-06-10 - cadenza MVP`); annotation cycle (complex
 4. MAx actions needed before M2: create GCP project billing OK, BotFather bots, provide icu API key + Anthropic key for Secret Manager.
 5. Vault note name OK as `Plans/2026-06-10 - cadenza MVP`?
 | 27 | GCP project (supersedes 22) | Existing playground-maroffo (208669631335), europe-west1 | MAx call; billing already linked, no existing Firestore (default DB free), no WIF pool conflicts; faster to checkpoint | Playground experiments start competing for Firestore default DB or IAM hygiene degrades |
+| 28 | job-store boundary | job MAY import store domain types (Mutation, Turn, Rule, constants) but NEVER *firestore.Client; behavioral seams stay interfaces | M5 made store the mutation-schema owner; extracting a neutral types pkg = churn without a second consumer | A second binary or package needs the schema types |

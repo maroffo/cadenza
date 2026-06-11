@@ -19,9 +19,11 @@ type Scripted interface{ isScripted() }
 type Text struct{ S string }
 
 // ToolUse asks for tool calls; multiple entries in one response model the
-// API's parallel tool use.
+// API's parallel tool use. Thinking, when set, prepends a thinking block:
+// the real API requires it replayed verbatim on continuation.
 type ToolUse struct {
-	Calls []ToolCall
+	Calls    []ToolCall
+	Thinking string
 }
 
 type ToolCall struct {
@@ -117,7 +119,12 @@ func (f *Anthropic) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		f.writeMessage(w, req.Model, s.Reason, content)
 	case ToolUse:
-		content := make([]any, 0, len(s.Calls))
+		content := make([]any, 0, len(s.Calls)+1)
+		if s.Thinking != "" {
+			content = append(content, map[string]any{
+				"type": "thinking", "thinking": s.Thinking, "signature": "fake-sig",
+			})
+		}
 		for _, c := range s.Calls {
 			content = append(content, map[string]any{
 				"type": "tool_use", "id": c.ID, "name": c.Name, "input": c.Input,

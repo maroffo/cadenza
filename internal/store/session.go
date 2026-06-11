@@ -73,7 +73,9 @@ func (s *Sessions) AppendTurn(ctx context.Context, sessionID string, seq int, ro
 	}
 	doc := s.client.Collection(sessionsCollection).Doc(sessionID).
 		Collection(turnsSubcollection).Doc(fmt.Sprintf("%06d", seq))
-	if _, err := doc.Set(ctx, turn); err != nil {
+	// Create, not Set: a seq collision must surface as an error, never
+	// silently overwrite history (concurrent deliveries, bad seq math).
+	if _, err := doc.Create(ctx, turn); err != nil {
 		return fmt.Errorf("session append: %w", err)
 	}
 	_, err := s.client.Collection(sessionsCollection).Doc(sessionID).

@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-telegram/bot/models"
 
+	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
@@ -381,5 +382,82 @@ func TestMessage_PollingPayloadContract(t *testing.T) {
 	}
 	if uc.CallbackQuery == nil || uc.CallbackQuery.ID != "cb9" || uc.CallbackQuery.From.ID != allowedID {
 		t.Errorf("callback contract broken: %+v", uc)
+	}
+}
+
+type stubResolver struct {
+	resolved []string
+	status   string
+}
+
+func (s *stubResolver) Resolve(_ context.Context, id string, approve bool) (*store.Mutation, error) {
+	s.resolved = append(s.resolved, fmt.Sprintf("%s:%v", id, approve))
+	return &store.Mutation{Kind: store.MutationRule, NewValue: "regola X", Status: s.status}, nil
+}
+
+func TestMessage_MutationConfirmCallback(t *testing.T) {
+	out := &stubInteractor{}
+	res := &stubResolver{status: "confirmed"}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Muts = res
+	cb := fmt.Sprintf(`{"update_id":31,"callback_query":{"id":"cb31","data":"pm:mut-abc123:y","from":{"id":%d}}}`, allowedID)
+
+	if err := m.Run(context.Background(), envelopeFor(t, 31, cb)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.resolved) != 1 || res.resolved[0] != "mut-abc123:true" {
+		t.Errorf("resolved = %v", res.resolved)
+	}
+	if len(out.answered) != 1 {
+		t.Fatal("callback not answered (stuck spinner)")
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "Salvato nel profilo") {
+		t.Errorf("feedback = %v", out.plain)
+	}
+}
+
+func TestMessage_MutationRejectCallback(t *testing.T) {
+	out := &stubInteractor{}
+	res := &stubResolver{status: "rejected"}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Muts = res
+	cb := fmt.Sprintf(`{"update_id":32,"callback_query":{"id":"cb32","data":"pm:mut-abc123:n","from":{"id":%d}}}`, allowedID)
+
+	if err := m.Run(context.Background(), envelopeFor(t, 32, cb)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.resolved[0] != "mut-abc123:false" {
+		t.Errorf("resolved = %v", res.resolved)
+	}
+	if !strings.Contains(out.plain[0], "Scartata") {
+		t.Errorf("feedback = %v", out.plain)
+	}
+}
+
+func TestMessage_MalformedMutationCallbackIgnored(t *testing.T) {
+	out := &stubInteractor{}
+	res := &stubResolver{status: "confirmed"}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Muts = res
+	for n, data := range []string{"pm::y", "pm:id:x", "pm:id", "qm:id:y"} {
+		cb := fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"cb","data":%q,"from":{"id":%d}}}`, 40+n, data, allowedID)
+		if err := m.Run(context.Background(), envelopeFor(t, int64(40+n), cb)); err != nil {
+			t.Fatalf("Run(%q): %v", data, err)
+		}
+	}
+	if len(res.resolved) != 0 {
+		t.Errorf("malformed callbacks resolved: %v", res.resolved)
+	}
+}
+
+func TestMessage_FreeTextRoutesToCoachNilKeepsNotice(t *testing.T) {
+	// Coach nil: the honest notice survives as the fallback.
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	if err := m.Run(context.Background(), envelopeFor(t, 51, msgPayload("ciao coach", allowedID))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "prossima versione") {
+		t.Errorf("fallback notice missing: %v", out.plain)
 	}
 }

@@ -20,3 +20,11 @@ func (a ICU) WellnessRange(ctx context.Context, oldest, newest string) ([]icu.We
 	}
 	return icu.DecodeWellnessRange(raw)
 }
+
+func (a ICU) ActivitiesRange(ctx context.Context, oldest, newest string) ([]icu.Activity, error) {
+	raw, err := a.C.ListActivities(ctx, icu.ListActivitiesParams{Oldest: oldest, Newest: newest})
+	if err != nil {
+		return nil, err
+	}
+	return icu.DecodeActivities(raw)
+}

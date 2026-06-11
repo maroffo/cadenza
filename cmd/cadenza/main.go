@@ -178,16 +178,6 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Now:      time.Now,
 		TZ:       tz,
 	}
-	// M4: the coach voice. No key (dev without LLM) = skeleton mode.
-	if cfg.AnthropicAPIKey != "" {
-		morning.Narrator = agent.Narrator{
-			Client: agent.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL),
-			Model:  cfg.ModelCheap,
-		}
-		morning.Sessions = store.NewSessions(fsClient)
-		morning.ModelName = cfg.ModelCheap
-	}
-	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
 	message := job.Message{
 		AllowedUserID: cfg.TelegramChatID,
 		Dedup:         store.NewDedup(fsClient),
@@ -195,5 +185,33 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Out:           sender,
 		Status:        morning,
 	}
+	// M4/M5: the coach voice. No key (dev without LLM) = skeleton mode.
+	if cfg.AnthropicAPIKey != "" {
+		llm := agent.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
+		morning.Narrator = agent.Narrator{Client: llm, Model: cfg.ModelCheap}
+		morning.Sessions = store.NewSessions(fsClient)
+		morning.ModelName = cfg.ModelCheap
+
+		chats := store.NewChats(fsClient)
+		message.Coach = &job.Coach{
+			Agent:      agent.Coach{Client: llm, Model: cfg.ModelDeep},
+			Wellness:   job.ICU{C: icuClient},
+			Activities: job.ICU{C: icuClient},
+			Profiles:   store.NewProfiles(fsClient),
+			Rules:      store.NewRules(fsClient),
+			RuleCount:  store.NewRules(fsClient),
+			Muts:       store.NewMutations(fsClient),
+			Budget:     store.NewBudget(fsClient),
+			Sessions:   store.NewSessions(fsClient),
+			Chats:      chats,
+			Status:     morning,
+			Out:        sender,
+			Confirm:    sender,
+			Now:        time.Now,
+			TZ:         tz,
+		}
+		message.Muts = store.NewMutations(fsClient)
+	}
+	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
 	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message}, nil
 }

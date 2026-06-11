@@ -191,3 +191,233 @@ func TestSessions_RoundTripAndCorruptionFallback(t *testing.T) {
 		t.Fatal("corrupted turn loaded without error (fresh-session fallback impossible)")
 	}
 }
+
+func TestMutations_LifecycleRampCap(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	profiles := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 35, HRVSD: 8, RestingHR: 54}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	id := MutationID("s-test", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	mut := Mutation{
+		Kind: MutationRampCap, NewValue: "3.5", OldValue: "4.0",
+		Rationale: "fase di scarico", SourceQuote: "voglio scaricare",
+		SessionID: "s-test", ToolUseID: "tu-x",
+	}
+	if err := muts.Propose(ctx, id, mut); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	// Agent-loop retry: same deterministic id, must not duplicate or error.
+	if err := muts.Propose(ctx, id, mut); err != nil {
+		t.Fatalf("Propose retry: %v", err)
+	}
+
+	resolved, err := muts.Resolve(ctx, id, true)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if resolved.Status != "confirmed" {
+		t.Errorf("status = %q", resolved.Status)
+	}
+	_, rampCap, err := profiles.Profile(ctx)
+	if err != nil || rampCap != 3.5 {
+		t.Fatalf("profile ramp_cap = %v, %v; want 3.5 applied transactionally", rampCap, err)
+	}
+
+	// Double tap: idempotent, still confirmed, no re-apply error.
+	again, err := muts.Resolve(ctx, id, false) // even a late "reject" tap
+	if err != nil {
+		t.Fatalf("Resolve double-tap: %v", err)
+	}
+	if again.Status != "confirmed" {
+		t.Errorf("double tap changed status to %q", again.Status)
+	}
+}
+
+func TestMutations_RejectLeavesProfileUntouched(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	profiles := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 35, HRVSD: 8, RestingHR: 54}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	id := MutationID("s-rej", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	if err := muts.Propose(ctx, id, Mutation{Kind: MutationRampCap, NewValue: "2.0"}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if _, err := muts.Resolve(ctx, id, false); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	_, rampCap, err := profiles.Profile(ctx)
+	if err != nil || rampCap != 4.0 {
+		t.Fatalf("ramp_cap = %v after reject, want untouched 4.0", rampCap)
+	}
+}
+
+func TestMutations_HostileRampCapBlockedAtApply(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	id := MutationID("s-evil", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	if err := muts.Propose(ctx, id, Mutation{Kind: MutationRampCap, NewValue: "12"}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if _, err := muts.Resolve(ctx, id, true); err == nil {
+		t.Fatal("confirmed ramp_cap 12 applied; Tier A ceiling must block even confirmed values")
+	}
+}
+
+func TestMutations_RuleConfirmAppearsActive(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	rules := NewRules(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	id := MutationID("s-rule", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	text := fmt.Sprintf("Niente qualità il giorno dopo un volo (%d)", time.Now().UnixNano())
+	if err := muts.Propose(ctx, id, Mutation{Kind: MutationRule, NewValue: text}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if _, err := muts.Resolve(ctx, id, true); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	active, err := rules.ListActive(ctx)
+	if err != nil {
+		t.Fatalf("ListActive: %v", err)
+	}
+	found := false
+	for _, r := range active {
+		if r.Text == text {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("confirmed rule not active: %+v", active)
+	}
+}
+
+func TestChats_ActiveSessionPointer(t *testing.T) {
+	client := emulatorClient(t)
+	c := NewChats(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := c.Save(ctx, 424242, 424242); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	sid := fmt.Sprintf("s-chat-%d", time.Now().UnixNano())
+	if err := c.SetActiveSession(ctx, sid); err != nil {
+		t.Fatalf("SetActiveSession: %v", err)
+	}
+	got, err := c.ActiveSession(ctx)
+	if err != nil || got != sid {
+		t.Fatalf("ActiveSession = %q, %v; want %q", got, err, sid)
+	}
+	// Save must not wipe the pointer (merge semantics on /start re-runs)?
+	// Save overwrites by design (fresh /start = fresh state); pin it.
+	if err := c.Save(ctx, 424242, 424242); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, _ = c.ActiveSession(ctx)
+	if got != "" {
+		t.Fatalf("re-/start kept stale session %q, want reset", got)
+	}
+}
+
+func TestMutations_ConcurrentTapsSingleTerminalStatus(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	profiles := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := profiles.Seed(ctx, verdict.Baselines{HRVMean: 35, HRVSD: 8, RestingHR: 54}, 4.0); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	id := MutationID("s-race", fmt.Sprintf("tu-%d", time.Now().UnixNano()))
+	if err := muts.Propose(ctx, id, Mutation{Kind: MutationRampCap, NewValue: "3.0"}); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+
+	results := make(chan string, 2)
+	for _, approve := range []bool{true, false} {
+		go func(a bool) {
+			m, err := muts.Resolve(ctx, id, a)
+			if err != nil {
+				results <- "err:" + err.Error()
+				return
+			}
+			results <- m.Status
+		}(approve)
+	}
+	a, b := <-results, <-results
+	if a != b {
+		t.Fatalf("divergent terminal statuses: %q vs %q (transaction must serialize taps)", a, b)
+	}
+}
+
+func TestRules_ActiveTextsStableOrdering(t *testing.T) {
+	client := emulatorClient(t)
+	muts := NewMutations(client)
+	rules := NewRules(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	for i := range 3 {
+		id := MutationID("s-ord", fmt.Sprintf("tu-%d-%d", time.Now().UnixNano(), i))
+		text := fmt.Sprintf("Regola ordinamento %d %d", i, time.Now().UnixNano())
+		if err := muts.Propose(ctx, id, Mutation{Kind: MutationRule, NewValue: text}); err != nil {
+			t.Fatalf("Propose: %v", err)
+		}
+		if _, err := muts.Resolve(ctx, id, true); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+	}
+	first, err := rules.ActiveTexts(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTexts: %v", err)
+	}
+	second, err := rules.ActiveTexts(ctx)
+	if err != nil {
+		t.Fatalf("ActiveTexts: %v", err)
+	}
+	if len(first) < 3 {
+		t.Fatalf("rules = %d, want >= 3", len(first))
+	}
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("ordering not stable at %d: %q vs %q (cache prefix would churn)", i, first[i], second[i])
+		}
+	}
+}
+
+func TestBudget_SpendCapsAtLimit(t *testing.T) {
+	client := emulatorClient(t)
+	b := NewBudget(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	date := fmt.Sprintf("2099-budget-%d", time.Now().UnixNano())
+
+	for i := range 3 {
+		ok, err := b.Spend(ctx, date, 3)
+		if err != nil || !ok {
+			t.Fatalf("Spend %d = %v, %v; want allowed", i, ok, err)
+		}
+	}
+	ok, err := b.Spend(ctx, date, 3)
+	if err != nil {
+		t.Fatalf("Spend over: %v", err)
+	}
+	if ok {
+		t.Fatal("4th call allowed past a limit of 3 (decision 18 not mechanical)")
+	}
+}

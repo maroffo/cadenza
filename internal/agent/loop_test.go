@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthropics/anthropic-sdk-go"
+
 	"github.com/maroffo/cadenza/internal/fakes"
 )
 
@@ -43,24 +45,6 @@ func TestRun_PlainTextCompletes(t *testing.T) {
 		t.Errorf("model = %q", fake.Requests[0].Model)
 	}
 }
-
-func TestRun_NoCacheControlOnCheapTier(t *testing.T) {
-	// Decision 10: no caching on Haiku; nothing reads the cache within the
-	// TTL of a single-shot 07:00 run.
-	fake := fakes.NewAnthropic(fakes.Text{S: "ok"})
-	defer fake.Close()
-
-	_, err := Run(context.Background(), newTestClient(fake.URL()), Request{
-		Model: "claude-haiku-4-5-20251001", System: "s", UserText: "u", MaxTokens: 128,
-	}, nil)
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if strings.Contains(string(fake.Requests[0].System), "cache_control") {
-		t.Error("cache_control present on the cheap tier")
-	}
-}
-
 func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	fake := fakes.NewAnthropic(
 		fakes.Call("tu_1", "get_recent_activities", `{"days":3}`),
@@ -73,7 +57,7 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 		"get_recent_activities": Tool{
 			Description: "ultime attività",
 			Schema:      json.RawMessage(`{"type":"object","properties":{"days":{"type":"integer"}}}`),
-			Handler: func(ctx context.Context, input json.RawMessage) (string, error) {
+			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
 				called++
 				return `[{"date":"2026-06-10","type":"Run","load":35}]`, nil
 			},
@@ -113,7 +97,7 @@ func TestRun_ToolFailureBecomesIsError(t *testing.T) {
 		"boom": Tool{
 			Description: "fails",
 			Schema:      json.RawMessage(`{"type":"object"}`),
-			Handler: func(context.Context, json.RawMessage) (string, error) {
+			Handler: func(context.Context, string, json.RawMessage) (string, error) {
 				return "", errors.New("icu 502")
 			},
 		},
@@ -163,7 +147,7 @@ func TestRun_IterationCapStopsRunaway(t *testing.T) {
 	tools := Tools{"ping": Tool{
 		Description: "loops forever",
 		Schema:      json.RawMessage(`{"type":"object"}`),
-		Handler: func(context.Context, json.RawMessage) (string, error) {
+		Handler: func(context.Context, string, json.RawMessage) (string, error) {
 			return "pong", nil
 		},
 	}}
@@ -292,9 +276,9 @@ func TestRun_ParallelToolCallsAllAnswered(t *testing.T) {
 
 	tools := Tools{
 		"ok_tool": Tool{Description: "ok", Schema: json.RawMessage(`{"type":"object"}`),
-			Handler: func(context.Context, json.RawMessage) (string, error) { return "dati", nil }},
+			Handler: func(context.Context, string, json.RawMessage) (string, error) { return "dati", nil }},
 		"bad_tool": Tool{Description: "bad", Schema: json.RawMessage(`{"type":"object"}`),
-			Handler: func(context.Context, json.RawMessage) (string, error) { return "", errors.New("boom") }},
+			Handler: func(context.Context, string, json.RawMessage) (string, error) { return "", errors.New("boom") }},
 	}
 	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
 		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
@@ -318,7 +302,7 @@ func TestRun_MalformedToolSchemaFailsLoudly(t *testing.T) {
 	defer fake.Close()
 
 	tools := Tools{"broken": Tool{Description: "x", Schema: json.RawMessage(`{not json`),
-		Handler: func(context.Context, json.RawMessage) (string, error) { return "", nil }}}
+		Handler: func(context.Context, string, json.RawMessage) (string, error) { return "", nil }}}
 	if _, err := Run(context.Background(), newTestClient(fake.URL()), Request{
 		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
 	}, tools); err == nil {
@@ -338,7 +322,7 @@ func TestRun_ToolsSerializedInSortedOrder(t *testing.T) {
 	tools := Tools{}
 	for _, n := range []string{"zeta", "alpha", "mid"} {
 		tools[n] = Tool{Description: n, Schema: json.RawMessage(`{"type":"object"}`),
-			Handler: func(context.Context, json.RawMessage) (string, error) { return "", nil }}
+			Handler: func(context.Context, string, json.RawMessage) (string, error) { return "", nil }}
 	}
 	for range 2 {
 		if _, err := Run(context.Background(), newTestClient(fake.URL()), Request{
@@ -355,5 +339,137 @@ func TestRun_ToolsSerializedInSortedOrder(t *testing.T) {
 	ia, im, iz := strings.Index(string(a), "alpha"), strings.Index(string(a), "mid"), strings.Index(string(a), "zeta")
 	if ia >= im || im >= iz {
 		t.Fatalf("tools not sorted: alpha@%d mid@%d zeta@%d", ia, im, iz)
+	}
+}
+
+func TestRun_DeepTierWireShape(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Text{S: "risposta"})
+	defer fake.Close()
+
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model:     "claude-opus-4-8",
+		System:    "sei il coach",
+		Profile:   "PROFILO: baseline HRV 35",
+		UserText:  "come sto?",
+		MaxTokens: 2048,
+		Cache:     true,
+		Thinking:  true,
+		Effort:    "high",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Text != "risposta" {
+		t.Errorf("text = %q", res.Text)
+	}
+	raw := string(fake.Requests[0].Raw)
+
+	// Exactly ONE cache breakpoint, on the profile block (the stable prefix).
+	if n := strings.Count(raw, "cache_control"); n != 1 {
+		t.Errorf("cache_control occurrences = %d, want exactly 1:\n%s", n, raw)
+	}
+	if !strings.Contains(raw, "PROFILO: baseline HRV 35") {
+		t.Error("profile block missing from system")
+	}
+	if !strings.Contains(raw, `"thinking":{`) || !strings.Contains(raw, `"adaptive"`) {
+		t.Errorf("adaptive thinking missing:\n%s", raw)
+	}
+	if !strings.Contains(raw, `"effort":"high"`) {
+		t.Errorf("output_config effort missing:\n%s", raw)
+	}
+}
+
+func TestRun_CheapTierStaysClean(t *testing.T) {
+	// The Haiku request must NOT grow thinking/effort/cache by accident:
+	// Haiku 4.5 rejects adaptive thinking and the cache would never be read.
+	fake := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer fake.Close()
+
+	_, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "claude-haiku-4-5-20251001", System: "s", UserText: "u", MaxTokens: 128,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	raw := string(fake.Requests[0].Raw)
+	for _, forbidden := range []string{`"cache_control"`, `"thinking":{`, `"output_config":`} {
+		if strings.Contains(raw, forbidden) {
+			t.Errorf("cheap tier request contains %q:\n%s", forbidden, raw)
+		}
+	}
+}
+
+func TestRun_HistoryPrecedesUserTurn(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Text{S: "continuo"})
+	defer fake.Close()
+
+	history := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("ieri ti ho chiesto del lungo")),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock("e ti ho risposto di tenerlo facile")),
+	}
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", History: history, UserText: "e oggi?", MaxTokens: 256,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(fake.Requests[0].Messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (2 history + 1 new)", len(fake.Requests[0].Messages))
+	}
+	raw := string(fake.Requests[0].Raw)
+	iH := strings.Index(raw, "ieri ti ho chiesto")
+	iU := strings.Index(raw, "e oggi?")
+	if iH == -1 || iU == -1 || iH > iU {
+		t.Errorf("history not before user turn: hist@%d user@%d", iH, iU)
+	}
+	if len(res.Transcript) != 4 {
+		t.Errorf("transcript = %d, want 4 (history + user + assistant)", len(res.Transcript))
+	}
+}
+
+func TestRun_UsageCaptured(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer fake.Close()
+
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 64,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Usage.InputTokens != 100 || res.Usage.OutputTokens != 50 {
+		t.Errorf("usage = %+v, want fake's 100/50", res.Usage)
+	}
+}
+
+func TestRun_ThinkingPreservedAcrossToolContinuation(t *testing.T) {
+	// Production config is Thinking+tools together: the API REQUIRES the
+	// thinking block replayed verbatim when the loop continues after tools.
+	fake := fakes.NewAnthropic(
+		fakes.ToolUse{
+			Thinking: "ragionamento-interno-da-replicare",
+			Calls:    []fakes.ToolCall{{ID: "tu_t", Name: "ping", Input: json.RawMessage(`{}`)}},
+		},
+		fakes.Text{S: "fatto"},
+	)
+	defer fake.Close()
+
+	tools := Tools{"ping": Tool{Description: "p", Schema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(context.Context, string, json.RawMessage) (string, error) { return "pong", nil }}}
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 256, Thinking: true,
+	}, tools)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Text != "fatto" {
+		t.Errorf("text = %q", res.Text)
+	}
+	second := string(fake.Requests[1].Raw)
+	if !strings.Contains(second, "ragionamento-interno-da-replicare") {
+		t.Errorf("thinking block not replayed on continuation:\n%s", second)
+	}
+	if !strings.Contains(second, "fake-sig") {
+		t.Errorf("thinking signature not replayed (API rejects without it)")
 	}
 }
