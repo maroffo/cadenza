@@ -14,6 +14,7 @@ import (
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
@@ -673,5 +674,57 @@ func TestMorning_NarrativeSanitized(t *testing.T) {
 	}
 	if !strings.Contains(out.bodies[0], "<b>forte</b>") {
 		t.Errorf("allowed markup lost:\n%s", out.bodies[0])
+	}
+}
+
+type stubOpenInjuries struct {
+	open []store.Injury
+	err  error
+}
+
+func (s stubOpenInjuries) ListOpen(context.Context) ([]store.Injury, error) {
+	return s.open, s.err
+}
+
+func TestMorning_OpenInjurySkipsViaVerdict(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Injuries = stubOpenInjuries{open: []store.Injury{{BodyPart: "polpaccio", Pain: 6, Status: "open"}}}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if runs.completed["2026-06-10"] != "SKIP" {
+		t.Fatalf("status = %q, want SKIP (open injury pain 6)", runs.completed["2026-06-10"])
+	}
+	found := false
+	for _, r := range out.verdicts[0].Reasons {
+		if r.RuleID == "injury_active" && strings.Contains(r.Message, "polpaccio") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("injury_active not in verdict reasons: %+v", out.verdicts[0].Reasons)
+	}
+}
+
+func TestMorning_InjuryRegistryDownIsAGap(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Injuries = stubOpenInjuries{err: errors.New("firestore down")}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v (registry blip must not kill the morning)", err)
+	}
+	found := false
+	for _, g := range out.verdicts[0].DataGaps {
+		if strings.Contains(g, "registro infortuni") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("injury gap not in verdict: %+v", out.verdicts[0].DataGaps)
 	}
 }

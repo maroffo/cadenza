@@ -58,6 +58,8 @@ type Message struct {
 	Coach *Coach
 	// Muts resolves pm: confirmation callbacks; nil ignores them.
 	Muts MutationResolver
+	// Injuries handles inj: check-in callbacks; nil ignores them.
+	Injuries InjuryStore
 }
 
 const dedupTTL = 7 * 24 * time.Hour
@@ -199,8 +201,52 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 			return m.Out.Send(ctx, "Già gestita in precedenza ("+mut.Status+").")
 		}
 	}
+	if id, action, ok := parseInjuryCallback(u.CallbackQuery.Data); ok && m.Injuries != nil {
+		switch action {
+		case "resolve":
+			// Loosening: only the athlete's tap may do this.
+			if err := m.Injuries.Resolve(ctx, id); err != nil {
+				return fmt.Errorf("message: injury resolve: %w", err)
+			}
+			return m.Out.Send(ctx, "💪 Segnato come risolto: bentornato. Riprendiamo gradualmente, non da dove avevamo lasciato.")
+		case "worse":
+			if err := m.Injuries.RecordFeedback(ctx, id, action); err != nil {
+				return fmt.Errorf("message: injury feedback: %w", err)
+			}
+			// Worse at ANY day: the firm line, deterministic (spec: never
+			// train through structural pain).
+			return m.Out.Send(ctx, "🔴 Se peggiora, si cambia piano: stop al carico sulla zona e "+
+				"<b>fisioterapista</b>. Mai allenarsi attraverso un dolore strutturale che peggiora.")
+		case "better", "same":
+			if err := m.Injuries.RecordFeedback(ctx, id, action); err != nil {
+				return fmt.Errorf("message: injury feedback: %w", err)
+			}
+			if action == "better" {
+				return m.Out.Send(ctx, "📈 Bene. Continuiamo a monitorare: prudenza ancora per qualche giorno.")
+			}
+			return m.Out.Send(ctx, "😐 Registrato. Se al prossimo check non migliora, fisioterapista senza aspettare.")
+		}
+	}
 	slog.Info("message: unhandled callback data", "data", u.CallbackQuery.Data)
 	return nil
+}
+
+// parseInjuryCallback decodes "inj:<id>:better|same|worse|resolve".
+func parseInjuryCallback(data string) (id, action string, ok bool) {
+	rest, found := strings.CutPrefix(data, "inj:")
+	if !found {
+		return "", "", false
+	}
+	idx := strings.LastIndex(rest, ":")
+	if idx <= 0 {
+		return "", "", false
+	}
+	id, action = rest[:idx], rest[idx+1:]
+	switch action {
+	case "better", "same", "worse", "resolve":
+		return id, action, true
+	}
+	return "", "", false
 }
 
 // parseMutationCallback decodes "pm:<id>:y|n".

@@ -446,3 +446,57 @@ func TestLedger_RecordUpsertsByExternalID(t *testing.T) {
 		t.Errorf("status = %q, want overwritten to verified", rec.Status)
 	}
 }
+
+func TestInjuries_Lifecycle(t *testing.T) {
+	client := emulatorClient(t)
+	inj := NewInjuries(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	id := InjuryID(fmt.Sprintf("2099-%d", time.Now().UnixNano()), "Polpaccio Destro!")
+
+	if err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 6}); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	// Idempotent re-report.
+	if err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 7}); err != nil {
+		t.Fatalf("Open retry: %v", err)
+	}
+	got, err := inj.Get(ctx, id)
+	if err != nil || got == nil || got.Pain != 6 || got.Rev != 1 || got.Status != "open" {
+		t.Fatalf("Get = %+v, %v (retry must not overwrite)", got, err)
+	}
+
+	if err := inj.RecordFeedback(ctx, id, "same"); err != nil {
+		t.Fatalf("RecordFeedback: %v", err)
+	}
+	open, err := inj.ListOpen(ctx)
+	if err != nil {
+		t.Fatalf("ListOpen: %v", err)
+	}
+	found := false
+	for _, o := range open {
+		if o.ID == id && o.LastFeedback == "same" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("open injury with feedback not listed: %+v", open)
+	}
+
+	if err := inj.Resolve(ctx, id); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if err := inj.Resolve(ctx, id); err != nil { // double tap
+		t.Fatalf("Resolve again: %v", err)
+	}
+	got, _ = inj.Get(ctx, id)
+	if got.Status != "resolved" || got.Rev != 2 {
+		t.Fatalf("after resolve = %+v, want resolved rev2 (stale wakeups must die)", got)
+	}
+
+	// Log is sequenced append-only: opened, feedback, resolved (>=3 entries).
+	logs, err := client.Collection("injuries").Doc(id).Collection("log").Documents(ctx).GetAll()
+	if err != nil || len(logs) < 3 {
+		t.Fatalf("log entries = %d, %v; want >= 3", len(logs), err)
+	}
+}

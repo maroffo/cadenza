@@ -140,6 +140,7 @@ create_job() {
 # IDs are derived server-side from the date; static bodies are fine.
 create_job cadenza-morning   "0 7 * * *"  '{"v":1,"type":"morning_check","id":"morning-scheduler"}'
 create_job cadenza-watchdog  "15 7 * * *" '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
+create_job cadenza-reconcile "0 12 * * *" '{"v":1,"type":"daily_reconcile","id":"reconcile-scheduler"}'
 
 # ---- Dead-man's switch: email on Scheduler failures + watchdog ERROR ------------
 say "Monitoring: notification channel + alert policies"

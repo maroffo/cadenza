@@ -54,11 +54,13 @@ type ActiveInjury struct {
 }
 
 type Input struct {
-	Today     Day
-	Window    []Day // trailing days before today, oldest first
-	Baselines Baselines
-	RampCap   float64 // athlete-tunable (Tier B); clamped into tierARampCap
-	Injuries  []ActiveInjury
+	// DataGapInjuries: the registry was unreachable; be explicit about it.
+	DataGapInjuries bool
+	Today           Day
+	Window          []Day // trailing days before today, oldest first
+	Baselines       Baselines
+	RampCap         float64 // athlete-tunable (Tier B); clamped into tierARampCap
+	Injuries        []ActiveInjury
 }
 
 // Rules holds the tunable thresholds with safe defaults. Tunables arrive from
@@ -307,6 +309,9 @@ func Compute(in Input, rules Rules) Verdict {
 			fmt.Sprintf("%d/4", *inj), fmt.Sprintf("max %d", rules.InjuryFeelModify-1))
 	}
 
+	if in.DataGapInjuries {
+		v.DataGaps = append(v.DataGaps, "registro infortuni non disponibile")
+	}
 	// Injuries.
 	for _, inj := range in.Injuries {
 		if inj.Pain >= rules.InjurySkipPain {

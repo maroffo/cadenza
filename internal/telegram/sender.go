@@ -91,6 +91,26 @@ func (s *Sender) SendConfirm(ctx context.Context, text, yesData, noData string) 
 	return nil
 }
 
+// SendKeyboard sends an HTML message with one row of inline buttons.
+func (s *Sender) SendKeyboard(ctx context.Context, text string, buttons [][2]string) error {
+	row := make([]models.InlineKeyboardButton, 0, len(buttons))
+	for _, b := range buttons {
+		row = append(row, models.InlineKeyboardButton{Text: b[0], CallbackData: b[1]})
+	}
+	_, err := s.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    s.chatID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+		ReplyMarkup: models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{row},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("telegram send keyboard: %w", err)
+	}
+	return nil
+}
+
 // SendWithButton sends an HTML message with a single inline button.
 // callbackData must stay within Telegram's 64-byte limit.
 func (s *Sender) SendWithButton(ctx context.Context, text, buttonLabel, callbackData string) error {

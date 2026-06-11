@@ -14,6 +14,7 @@ import (
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/telegram"
 	"github.com/maroffo/cadenza/internal/verdict"
@@ -65,11 +66,17 @@ const (
 	MorningRetryDelay = 45 * time.Minute
 )
 
+// OpenInjuries feeds the injury_active verdict rule; nil = no registry yet.
+type OpenInjuries interface {
+	ListOpen(ctx context.Context) ([]store.Injury, error)
+}
+
 type Morning struct {
 	Wellness WellnessSource
 	Profiles ProfileSource
 	Out      Messenger
 	Runs     RunStore
+	Injuries OpenInjuries
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
@@ -230,6 +237,17 @@ func (m Morning) prepare(ctx context.Context, today string) (telegram.MorningDat
 	}
 
 	data, in := assemble(today, days, baselines, rampCap)
+	if m.Injuries != nil {
+		open, err := m.Injuries.ListOpen(ctx)
+		if err != nil {
+			// Conservative degrade: missing registry must not hide an injury.
+			slog.Warn("morning: injuries unavailable", "err", err)
+			in.DataGapInjuries = true
+		}
+		for _, inj := range open {
+			in.Injuries = append(in.Injuries, verdict.ActiveInjury{BodyPart: inj.BodyPart, Pain: inj.Pain})
+		}
+	}
 	return data, in, nil
 }
 

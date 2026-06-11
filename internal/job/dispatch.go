@@ -15,6 +15,7 @@ type Deps struct {
 	Morning  Morning
 	Watchdog Watchdog
 	Message  Message
+	Injury   InjuryJob
 }
 
 // Dispatch satisfies task.Dispatcher.
@@ -34,6 +35,10 @@ func (d Deps) Dispatch(ctx context.Context, env task.Envelope) error {
 		return d.Watchdog.Run(ctx)
 	case task.TypeTelegramUpdate:
 		return d.Message.Run(ctx, env)
+	case task.TypeInjuryWakeup:
+		return d.Injury.Wakeup(ctx, env)
+	case task.TypeDailyReconcile:
+		return d.Injury.Reconcile(ctx)
 	default:
 		// Unhandled type is poison: retrying cannot make a handler appear.
 		return fmt.Errorf("dispatch: unhandled task type %q (id %s): %w", env.Type, env.ID, task.ErrPoison)
