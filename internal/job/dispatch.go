@@ -5,6 +5,7 @@ package job
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/maroffo/cadenza/internal/task"
@@ -20,7 +21,15 @@ type Deps struct {
 func (d Deps) Dispatch(ctx context.Context, env task.Envelope) error {
 	switch env.Type {
 	case task.TypeMorningCheck:
-		return d.Morning.Run(ctx)
+		// The Scheduler's static body carries no payload (attempt 0); the
+		// HRV self-retry envelopes carry their attempt number.
+		var p morningPayload
+		if len(env.Payload) > 0 {
+			if err := json.Unmarshal(env.Payload, &p); err != nil {
+				return fmt.Errorf("dispatch: bad morning payload (id %s): %w", env.ID, task.ErrPoison)
+			}
+		}
+		return d.Morning.RunAttempt(ctx, p.Attempt)
 	case task.TypeWatchdog:
 		return d.Watchdog.Run(ctx)
 	case task.TypeTelegramUpdate:

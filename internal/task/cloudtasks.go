@@ -9,11 +9,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"time"
 
 	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type CloudTasks struct {
@@ -32,6 +34,20 @@ func (c *CloudTasks) Enqueue(ctx context.Context, e Envelope) error {
 	if err != nil {
 		return err
 	}
+	return c.create(ctx, req)
+}
+
+// EnqueueAt schedules the task for future dispatch (the +45min HRV retry).
+func (c *CloudTasks) EnqueueAt(ctx context.Context, e Envelope, at time.Time) error {
+	req, err := BuildTaskRequest(c.QueuePath, c.TargetURL, c.Audience, c.InvokerSA, e)
+	if err != nil {
+		return err
+	}
+	req.Task.ScheduleTime = timestamppb.New(at)
+	return c.create(ctx, req)
+}
+
+func (c *CloudTasks) create(ctx context.Context, req *cloudtaskspb.CreateTaskRequest) error {
 	create := c.createFn
 	if create == nil {
 		create = func(ctx context.Context, r *cloudtaskspb.CreateTaskRequest) error {
@@ -39,7 +55,7 @@ func (c *CloudTasks) Enqueue(ctx context.Context, e Envelope) error {
 			return err
 		}
 	}
-	err = create(ctx, req)
+	err := create(ctx, req)
 	if status.Code(err) == codes.AlreadyExists {
 		// Named-task dedup: this delivery already happened. Success.
 		return nil
