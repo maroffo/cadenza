@@ -76,6 +76,7 @@ func completeProdEnv() map[string]string {
 		"EXECUTOR_AUDIENCE":       "https://cadenza.example.run.app",
 		"INVOKER_EMAIL":           "cadenza-invoker@p.iam.gserviceaccount.com",
 		"TASKS_QUEUE_PATH":        "projects/p/locations/europe-west1/queues/cadenza-exec",
+		"ANTHROPIC_API_KEY":       "a",
 	}
 }
 
@@ -84,6 +85,7 @@ func TestLoad_ProdRequirements(t *testing.T) {
 		"GCP_PROJECT", "ICU_API_KEY", "TELEGRAM_BOT_TOKEN",
 		"TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",
 		"EXECUTOR_AUDIENCE", "INVOKER_EMAIL", "TASKS_QUEUE_PATH",
+		"ANTHROPIC_API_KEY",
 	} {
 		t.Run("missing "+missing+" rejected", func(t *testing.T) {
 			m := completeProdEnv()

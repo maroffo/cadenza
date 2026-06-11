@@ -140,39 +140,35 @@ func Compute(in Input, rules Rules) Verdict {
 	hrvThreshold := in.Baselines.HRVMean - rules.HRVLowSDFactor*in.Baselines.HRVSD
 
 	// HRV rules. Missing HRV is a data gap, not a zero.
-	switch {
-	case in.Today.HRV == nil:
+	if in.Today.HRV == nil {
 		v.DataGaps = append(v.DataGaps, "HRV non sincronizzata")
 		v.fire("missing_data",
 			"dato HRV mancante: verdetto conservativo",
 			"nessun valore", fmt.Sprintf("baseline %.0f", in.Baselines.HRVMean))
-	default:
+	} else {
 		v.check("HRV", fmt.Sprintf("%.0f", *in.Today.HRV),
 			fmt.Sprintf("min %.0f", hrvThreshold), *in.Today.HRV >= hrvThreshold)
-	}
-	switch {
-	case in.Today.HRV == nil:
-		// gap already recorded above
-	case *in.Today.HRV < hrvThreshold:
-		lowRun := 1
-		for idx := len(in.Window) - 1; idx >= 0; idx-- {
-			d := in.Window[idx]
-			if d.HRV != nil && *d.HRV < hrvThreshold {
-				lowRun++
-			} else {
-				break
+		if *in.Today.HRV < hrvThreshold {
+			lowRun := 1
+			for idx := len(in.Window) - 1; idx >= 0; idx-- {
+				d := in.Window[idx]
+				if d.HRV != nil && *d.HRV < hrvThreshold {
+					lowRun++
+				} else {
+					break
+				}
 			}
-		}
-		if lowRun >= rules.HRVLowDays {
-			v.fire("hrv_low_3d",
-				fmt.Sprintf("HRV sotto range da %d giorni consecutivi: recupero, e anomalia da segnalare", lowRun),
-				fmt.Sprintf("%.0f", *in.Today.HRV),
-				fmt.Sprintf("%.1f (baseline %.0f − %.2f×SD %.0f)", hrvThreshold, in.Baselines.HRVMean, rules.HRVLowSDFactor, in.Baselines.HRVSD))
-		} else {
-			v.fire("hrv_low",
-				"HRV sotto il range personale: solo lavoro facile",
-				fmt.Sprintf("%.0f", *in.Today.HRV),
-				fmt.Sprintf("%.1f", hrvThreshold))
+			if lowRun >= rules.HRVLowDays {
+				v.fire("hrv_low_3d",
+					fmt.Sprintf("HRV sotto range da %d giorni consecutivi: recupero, e anomalia da segnalare", lowRun),
+					fmt.Sprintf("%.0f", *in.Today.HRV),
+					fmt.Sprintf("%.1f (baseline %.0f − %.2f×SD %.0f)", hrvThreshold, in.Baselines.HRVMean, rules.HRVLowSDFactor, in.Baselines.HRVSD))
+			} else {
+				v.fire("hrv_low",
+					"HRV sotto il range personale: solo lavoro facile",
+					fmt.Sprintf("%.0f", *in.Today.HRV),
+					fmt.Sprintf("%.1f", hrvThreshold))
+			}
 		}
 	}
 

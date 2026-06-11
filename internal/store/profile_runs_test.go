@@ -138,3 +138,40 @@ func TestRuns_DeferredLifecycle(t *testing.T) {
 		t.Fatalf("completed after deferral reports done=%v err=%v, want true", done, err)
 	}
 }
+
+func TestSessions_RoundTripAndCorruptionFallback(t *testing.T) {
+	client := emulatorClient(t)
+	s := NewSessions(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	id, err := s.Create(ctx, "morning", time.Now())
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := s.AppendTurn(ctx, id, 1, "user", "dati", ""); err != nil {
+		t.Fatalf("AppendTurn 1: %v", err)
+	}
+	if err := s.AppendTurn(ctx, id, 2, "assistant", "narrativa", "haiku"); err != nil {
+		t.Fatalf("AppendTurn 2: %v", err)
+	}
+
+	turns, err := s.LoadTurns(ctx, id)
+	if err != nil {
+		t.Fatalf("LoadTurns: %v", err)
+	}
+	if len(turns) != 2 || turns[0].Role != "user" || turns[1].Model != "haiku" {
+		t.Errorf("turns = %+v", turns)
+	}
+
+	// Corrupt a turn by hand (wrong schema): load must FAIL loudly so the
+	// caller starts a fresh session instead of trusting partial history.
+	_, err = client.Collection("sessions").Doc(id).Collection("turns").Doc("000003").
+		Set(ctx, map[string]any{"seq": 3, "role": "assistant", "content": "x", "schema": 99})
+	if err != nil {
+		t.Fatalf("corrupt: %v", err)
+	}
+	if _, err := s.LoadTurns(ctx, id); err == nil {
+		t.Fatal("corrupted turn loaded without error (fresh-session fallback impossible)")
+	}
+}

@@ -29,6 +29,12 @@ type Config struct {
 
 	// Cloud Tasks queue path: projects/<p>/locations/<l>/queues/<q>.
 	TasksQueuePath string
+
+	// Anthropic: key required in prod from M4; base URL overridable for
+	// tests and e2e (empty = real API).
+	AnthropicAPIKey  string
+	AnthropicBaseURL string
+	ModelCheap       string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -64,6 +70,9 @@ func Load(getenv func(string) string) (*Config, error) {
 	cfg.ExecutorAudience = getenv("EXECUTOR_AUDIENCE")
 	cfg.InvokerEmail = getenv("INVOKER_EMAIL")
 	cfg.TasksQueuePath = getenv("TASKS_QUEUE_PATH")
+	cfg.AnthropicAPIKey = getenv("ANTHROPIC_API_KEY")
+	cfg.AnthropicBaseURL = getenv("ANTHROPIC_BASE_URL")
+	cfg.ModelCheap = orDefault(getenv("MODEL_CHEAP"), "claude-haiku-4-5-20251001")
 
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)
@@ -77,6 +86,7 @@ func Load(getenv func(string) string) (*Config, error) {
 			"EXECUTOR_AUDIENCE":       cfg.ExecutorAudience,
 			"INVOKER_EMAIL":           cfg.InvokerEmail,
 			"TASKS_QUEUE_PATH":        cfg.TasksQueuePath,
+			"ANTHROPIC_API_KEY":       cfg.AnthropicAPIKey,
 		}
 		for name, v := range required {
 			if v == "" {
