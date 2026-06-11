@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
+	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
@@ -41,12 +43,21 @@ type StatusComposer interface {
 	Compose(ctx context.Context) (string, verdict.Verdict, error)
 }
 
+// MutationResolver flips proposals on athlete taps; satisfied by store.Mutations.
+type MutationResolver interface {
+	Resolve(ctx context.Context, id string, approve bool) (*store.Mutation, error)
+}
+
 type Message struct {
 	AllowedUserID int64
 	Dedup         DedupStore
 	Chats         ChatStore
 	Out           Interactor
 	Status        StatusComposer
+	// Coach handles free text (M5); nil keeps the honest not-yet notice.
+	Coach *Coach
+	// Muts resolves pm: confirmation callbacks; nil ignores them.
+	Muts MutationResolver
 }
 
 const dedupTTL = 7 * 24 * time.Hour
@@ -145,7 +156,9 @@ func (m Message) handleMessage(ctx context.Context, u *tgUpdate) error {
 	case "/test":
 		return m.Out.SendWithButton(ctx, "Prova di conferma:", "OK ✅", "ping:1")
 	default:
-		// Honest placeholder: conversational coaching arrives with M4/M5.
+		if m.Coach != nil {
+			return m.Coach.Converse(ctx, u.Message.Text)
+		}
 		return m.Out.Send(ctx,
 			"Ricevuto. Le risposte del coach arrivano con la prossima versione; "+
 				"per ora: /status per il quadro di oggi.")
@@ -163,6 +176,45 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 	if u.CallbackQuery.Data == "ping:1" {
 		return m.Out.Send(ctx, "✅ Bottone funzionante, callback chiusa.")
 	}
+	if id, approve, ok := parseMutationCallback(u.CallbackQuery.Data); ok && m.Muts != nil {
+		mut, err := m.Muts.Resolve(ctx, id, approve)
+		if err != nil {
+			return fmt.Errorf("message: mutation resolve: %w", err)
+		}
+		switch mut.Status {
+		case "confirmed":
+			return m.Out.Send(ctx, "✅ Salvato nel profilo: "+describeMutation(mut)+
+				"\nAttivo dalla prossima conversazione.")
+		case "rejected":
+			return m.Out.Send(ctx, "👍 Scartata, il profilo resta com'era.")
+		default:
+			return m.Out.Send(ctx, "Già gestita in precedenza ("+mut.Status+").")
+		}
+	}
 	slog.Info("message: unhandled callback data", "data", u.CallbackQuery.Data)
 	return nil
+}
+
+// parseMutationCallback decodes "pm:<id>:y|n".
+func parseMutationCallback(data string) (id string, approve, ok bool) {
+	rest, found := strings.CutPrefix(data, "pm:")
+	if !found {
+		return "", false, false
+	}
+	id, verdict, found := strings.Cut(rest, ":")
+	if !found || id == "" || (verdict != "y" && verdict != "n") {
+		return "", false, false
+	}
+	return id, verdict == "y", true
+}
+
+func describeMutation(m *store.Mutation) string {
+	switch m.Kind {
+	case store.MutationRampCap:
+		return "tetto rampa CTL → " + m.NewValue + "/settimana"
+	case store.MutationRule:
+		return "regola: «" + m.NewValue + "»"
+	default:
+		return m.Kind + " → " + m.NewValue
+	}
 }

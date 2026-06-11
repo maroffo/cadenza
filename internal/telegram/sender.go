@@ -71,6 +71,26 @@ func (s *Sender) AnswerCallback(ctx context.Context, callbackID string) error {
 	return nil
 }
 
+// SendConfirm sends an HTML message with Confirm/Reject inline buttons.
+// Callback payloads must stay within Telegram's 64-byte limit.
+func (s *Sender) SendConfirm(ctx context.Context, text, yesData, noData string) error {
+	_, err := s.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID:    s.chatID,
+		Text:      text,
+		ParseMode: models.ParseModeHTML,
+		ReplyMarkup: models.InlineKeyboardMarkup{
+			InlineKeyboard: [][]models.InlineKeyboardButton{{
+				{Text: "✅ Conferma", CallbackData: yesData},
+				{Text: "❌ Scarta", CallbackData: noData},
+			}},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("telegram send confirm: %w", err)
+	}
+	return nil
+}
+
 // SendWithButton sends an HTML message with a single inline button.
 // callbackData must stay within Telegram's 64-byte limit.
 func (s *Sender) SendWithButton(ctx context.Context, text, buttonLabel, callbackData string) error {

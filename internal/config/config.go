@@ -35,6 +35,7 @@ type Config struct {
 	AnthropicAPIKey  string
 	AnthropicBaseURL string
 	ModelCheap       string
+	ModelDeep        string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -73,6 +74,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	cfg.AnthropicAPIKey = getenv("ANTHROPIC_API_KEY")
 	cfg.AnthropicBaseURL = getenv("ANTHROPIC_BASE_URL")
 	cfg.ModelCheap = orDefault(getenv("MODEL_CHEAP"), "claude-haiku-4-5-20251001")
+	cfg.ModelDeep = orDefault(getenv("MODEL_DEEP"), "claude-opus-4-8")
 
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)

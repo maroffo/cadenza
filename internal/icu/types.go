@@ -50,6 +50,28 @@ type Event struct {
 	WorkoutDoc     json.RawMessage `json:"workout_doc"`
 }
 
+// Activity is the trimmed view cadenza exposes to tools: full payloads are
+// huge and would poison the model context (mvilanova lesson).
+type Activity struct {
+	ID             int64    `json:"id"`
+	StartDateLocal string   `json:"start_date_local"`
+	Type           string   `json:"type"`
+	Name           *string  `json:"name"`
+	MovingTime     *int     `json:"moving_time"` // seconds
+	Distance       *float64 `json:"distance"`    // meters
+	TrainingLoad   *int     `json:"icu_training_load"`
+	AverageHR      *int     `json:"average_heartrate"`
+}
+
+// DecodeActivities parses the raw payload of ListActivities.
+func DecodeActivities(raw json.RawMessage) ([]Activity, error) {
+	var out []Activity
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DecodeEvents parses the raw payload of ListEvents.
 func DecodeEvents(raw json.RawMessage) ([]Event, error) {
 	var events []Event

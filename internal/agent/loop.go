@@ -40,26 +40,47 @@ func NewClient(apiKey, baseURL string) Client {
 type Tool struct {
 	Description string
 	Schema      json.RawMessage // full JSON schema of the input object
-	Handler     func(ctx context.Context, input json.RawMessage) (string, error)
+	// Handler receives the tool_use id: side effects keyed on it stay
+	// idempotent across loop retries (e.g. mutation proposals).
+	Handler func(ctx context.Context, toolUseID string, input json.RawMessage) (string, error)
 }
 
 type Tools map[string]Tool
 
 // Request is one model invocation; tier builders fill it.
+// Cheap tier (Haiku): Model/System/UserText/MaxTokens only. Deep tier
+// (Opus): Profile becomes the cached prefix block, History carries prior
+// turns, Thinking/Effort tune reasoning. Haiku 4.5 rejects thinking and
+// would never read a cache, so the zero values keep that tier clean.
 type Request struct {
 	Model     string
 	System    string
+	Profile   string // optional second system block; cache breakpoint lands here
+	History   []anthropic.MessageParam
 	UserText  string
 	MaxTokens int
+	Cache     bool
+	Thinking  bool
+	Effort    string // "", "low", "medium", "high", "xhigh", "max"
+}
+
+// Usage mirrors the API counters; CacheRead is what proves the prefix
+// cache actually hits (decision 10: verify, never assume).
+type Usage struct {
+	InputTokens   int64
+	OutputTokens  int64
+	CacheRead     int64
+	CacheCreation int64
 }
 
 // Result is what a loop run produces. Transcript carries the full exchange
-// (user turns, assistant turns, tool results) so M5 can persist and resume
-// conversations without a signature break.
+// (user turns, assistant turns, tool results) so conversations persist and
+// resume without a signature break.
 type Result struct {
 	Text       string
 	StopReason string
 	Transcript []anthropic.MessageParam
+	Usage      Usage
 }
 
 // Run executes the tool loop.
@@ -68,12 +89,35 @@ func Run(ctx context.Context, c Client, req Request, tools Tools) (Result, error
 	if err != nil {
 		return Result{}, err
 	}
+	system := []anthropic.TextBlockParam{{Text: req.System}}
+	if req.Profile != "" {
+		profileBlock := anthropic.TextBlockParam{Text: req.Profile}
+		if req.Cache {
+			// One breakpoint, on the last stable block: everything above it
+			// (system + sorted tools + profile) becomes the cached prefix.
+			profileBlock.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		}
+		system = append(system, profileBlock)
+	} else if req.Cache {
+		system[0].CacheControl = anthropic.NewCacheControlEphemeralParam()
+	}
+
+	messages := make([]anthropic.MessageParam, 0, len(req.History)+1)
+	messages = append(messages, req.History...)
+	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(req.UserText)))
+
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(req.Model),
 		MaxTokens: int64(req.MaxTokens),
-		System:    []anthropic.TextBlockParam{{Text: req.System}},
-		Messages:  []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(req.UserText))},
+		System:    system,
+		Messages:  messages,
 		Tools:     tp,
+	}
+	if req.Thinking {
+		params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
+	}
+	if req.Effort != "" {
+		params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(req.Effort)}
 	}
 
 	for range maxIterations {
@@ -104,10 +148,21 @@ func Run(ctx context.Context, c Client, req Request, tools Tools) (Result, error
 				return Result{}, fmt.Errorf("agent: empty response (stop_reason %s)", resp.StopReason)
 			}
 			params.Messages = append(params.Messages, resp.ToParam())
+			usage := Usage{
+				InputTokens:   resp.Usage.InputTokens,
+				OutputTokens:  resp.Usage.OutputTokens,
+				CacheRead:     resp.Usage.CacheReadInputTokens,
+				CacheCreation: resp.Usage.CacheCreationInputTokens,
+			}
+			// The cache claim is verified here, in logs, not assumed (decision 10).
+			slog.Info("agent: usage",
+				"model", req.Model, "input", usage.InputTokens, "output", usage.OutputTokens,
+				"cache_read", usage.CacheRead, "cache_creation", usage.CacheCreation)
 			return Result{
 				Text:       text,
 				StopReason: string(resp.StopReason),
 				Transcript: params.Messages,
+				Usage:      usage,
 			}, nil
 		}
 	}
@@ -139,7 +194,7 @@ func toolResults(ctx context.Context, resp *anthropic.Message, tools Tools) []an
 			results = append(results, anthropic.NewToolResultBlock(tu.ID, "unknown tool: "+tu.Name, true))
 			continue
 		}
-		out, err := tool.Handler(ctx, tu.Input)
+		out, err := tool.Handler(ctx, tu.ID, tu.Input)
 		if err != nil {
 			slog.Warn("agent: tool failed", "tool", tu.Name, "err", err)
 			results = append(results, anthropic.NewToolResultBlock(tu.ID, "tool error: "+err.Error(), true))
