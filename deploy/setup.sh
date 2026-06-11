@@ -10,7 +10,9 @@ REGION="${REGION:-europe-west1}"
 SERVICE="${SERVICE:-cadenza}"
 QUEUE="${QUEUE:-cadenza-exec}"
 TZ_CRON="${TZ_CRON:-Europe/Rome}"
-ALERT_EMAIL="${ALERT_EMAIL:?set ALERT_EMAIL for the dead-man's switch channel}"
+# No apostrophes inside ${...:?msg}: bash treats quotes in expansions as
+# quoting even within double quotes, and the script dies at EOF.
+ALERT_EMAIL="${ALERT_EMAIL:?set ALERT_EMAIL for the deadman switch alert channel}"
 GITHUB_REPO="${GITHUB_REPO:-maroffo/cadenza}"
 
 RUN_SA="cadenza-run@${PROJECT}.iam.gserviceaccount.com"
