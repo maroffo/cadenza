@@ -210,6 +210,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Confirm:    sender,
 			Writer:     &icuwrite.Writer{C: icuClient},
 			Ledger:     store.NewLedger(fsClient),
+			Summary:    agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
 			Now:        time.Now,
 			TZ:         tz,
 		}
