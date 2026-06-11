@@ -21,6 +21,7 @@ import (
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/config"
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/icuwrite"
 	"github.com/maroffo/cadenza/internal/job"
 	"github.com/maroffo/cadenza/internal/server"
 	"github.com/maroffo/cadenza/internal/store"
@@ -207,6 +208,8 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Status:     morning,
 			Out:        sender,
 			Confirm:    sender,
+			Writer:     &icuwrite.Writer{C: icuClient},
+			Ledger:     store.NewLedger(fsClient),
 			Now:        time.Now,
 			TZ:         tz,
 		}

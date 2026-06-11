@@ -16,10 +16,24 @@ import (
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/icuwrite"
+	"github.com/maroffo/cadenza/internal/safety"
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/telegram"
 	"github.com/maroffo/cadenza/internal/verdict"
+	"github.com/maroffo/cadenza/internal/workout"
 )
+
+// WorkoutWriter writes a plan to the calendar with verification; satisfied
+// by icuwrite.Writer.
+type WorkoutWriter interface {
+	WriteVerified(ctx context.Context, p workout.Plan) (icuwrite.Outcome, error)
+}
+
+// WriteLedger records every write attempt; satisfied by store.Ledger.
+type WriteLedger interface {
+	Record(ctx context.Context, rec store.WriteRecord) error
+}
 
 // maxSessionTurns rotates the conversation before the context (and the
 // Firestore doc count) grows unbounded.
@@ -82,8 +96,11 @@ type Coach struct {
 	Status     StatusComposer
 	Out        Interactor
 	Confirm    Confirmer
-	Now        func() time.Time
-	TZ         *time.Location
+	// Writer enables write_workout (M6); nil hides the tool entirely.
+	Writer WorkoutWriter
+	Ledger WriteLedger
+	Now    func() time.Time
+	TZ     *time.Location
 }
 
 // RuleCounter caps the prefix injection surface.
@@ -143,9 +160,10 @@ func (c *Coach) Converse(ctx context.Context, text string) error {
 		"Contesto deterministico di oggi (gia' calcolato, non contraddirlo):\n%s\n%s\n\nMessaggio dell'atleta:\n%s",
 		body, verdict.RenderBlock(v), text)
 
+	today := c.Now().In(c.TZ).Format(dateOnly)
 	res, err := c.Agent.Reply(ctx, agent.CoachInput{
 		Profile: prefix, History: history, UserText: userText,
-	}, c.tools(sessionID))
+	}, c.tools(sessionID, v, today))
 	if err != nil {
 		slog.Warn("coach: reply failed, degraded", "err", err)
 		return c.Out.Send(ctx,
@@ -243,10 +261,11 @@ func (c *Coach) persist(ctx context.Context, sessionID, userText, reply string) 
 
 const dateOnly = "2006-01-02"
 
-// tools builds the read registry plus the mutation proposer, bound to the
-// current session for deterministic proposal ids.
-func (c *Coach) tools(sessionID string) agent.Tools {
-	return agent.Tools{
+// tools builds the read registry plus the mutation proposer and (when a
+// writer is wired) the workout writer, bound to the current session and
+// today's verdict: the gate decision depends on both.
+func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.Tools {
+	t := agent.Tools{
 		"get_recent_activities": {
 			Description: "Ultime attività dell'atleta (già filtrate). days: 1-14.",
 			Schema:      json.RawMessage(`{"type":"object","properties":{"days":{"type":"integer","minimum":1,"maximum":14}},"required":["days"]}`),
@@ -305,6 +324,69 @@ func (c *Coach) tools(sessionID string) agent.Tools {
 			},
 		},
 	}
+	if c.Writer != nil {
+		t["write_workout"] = agent.Tool{
+			Description: "Scrivi un allenamento strutturato sul calendario intervals.icu. " +
+				"Il SafetyGate deterministico valuta il piano: se RIFIUTATO, correggi " +
+				"secondo le violazioni e riprova; se BLOCCATO, fermati e parlane con l'atleta.",
+			Schema: json.RawMessage(workout.ToolSchema),
+			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
+				return c.writeWorkout(ctx, sessionID, v, today, input)
+			},
+		}
+	}
+	return t
+}
+
+// writeWorkout is the full gauntlet: schema -> gate -> verified write ->
+// ledger. The model NEVER touches the calendar except through here.
+func (c *Coach) writeWorkout(ctx context.Context, sessionID string, v verdict.Verdict, today string, input json.RawMessage) (string, error) {
+	var p workout.Plan
+	if err := json.Unmarshal(input, &p); err != nil {
+		return "", fmt.Errorf("piano non decodificabile: %w", err)
+	}
+	d := safety.Vet(p, v, today)
+	switch d.Action {
+	case safety.Block:
+		// Not auto-resolvable: tell the model to STOP, not regenerate.
+		slog.Warn("coach: gate BLOCK", "violations", d.Violations)
+		return "", fmt.Errorf("BLOCCATO dal SafetyGate, NON riprovare: %s. Spiega all'atleta perché e cosa propone in alternativa", renderViolations(d.Violations))
+	case safety.Reject:
+		slog.Info("coach: gate reject", "violations", d.Violations)
+		return "", fmt.Errorf("RIFIUTATO dal SafetyGate: %s. Correggi il piano e riprova", renderViolations(d.Violations))
+	}
+
+	out, err := c.Writer.WriteVerified(ctx, p)
+	if err != nil {
+		slog.Warn("coach: workout write failed", "err", err)
+		return "", fmt.Errorf("scrittura sul calendario non riuscita, riprova più tardi")
+	}
+	if c.Ledger != nil {
+		planJSON, _ := json.Marshal(p)
+		if lerr := c.Ledger.Record(ctx, store.WriteRecord{
+			Date: p.Date, Title: p.Title, ExternalID: out.ExternalID,
+			EventID: out.EventID, Status: string(out.Status),
+			Attempts: out.Attempts, Diffs: out.Diffs,
+			PlanJSON: string(planJSON), SessionID: sessionID,
+		}); lerr != nil {
+			slog.Warn("coach: ledger record failed", "err", lerr)
+		}
+	}
+	if out.Status != icuwrite.Verified {
+		return fmt.Sprintf("ATTENZIONE: scrittura NON verificata dopo %d tentativi (differenze: %s). "+
+			"Presenta il piano all'atleta passo per passo nel messaggio: il calendario potrebbe essere sbagliato",
+			out.Attempts, strings.Join(out.Diffs, "; ")), nil
+	}
+	return fmt.Sprintf("Allenamento scritto e VERIFICATO sul calendario: %q il %s (event %d). "+
+		"Conferma all'atleta cosa troverà sull'orologio", p.Title, p.Date, out.EventID), nil
+}
+
+func renderViolations(vs []safety.Violation) string {
+	parts := make([]string, 0, len(vs))
+	for _, v := range vs {
+		parts = append(parts, fmt.Sprintf("%s: %s (limite %s)", v.Bound, v.Observed, v.Limit))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func (c *Coach) propose(ctx context.Context, sessionID, toolUseID string, input json.RawMessage) (string, error) {
