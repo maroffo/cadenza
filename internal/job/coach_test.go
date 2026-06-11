@@ -776,3 +776,12 @@ func TestConverse_SummaryFailureRotatesAnyway(t *testing.T) {
 		t.Error("session not rotated")
 	}
 }
+
+// newCoachLLM scripts a single log_injury tool call followed by a reply.
+func newCoachLLM(t *testing.T, injuryInput string) *fakes.Anthropic {
+	t.Helper()
+	return fakes.NewAnthropic(
+		fakes.Call("tu_inj", "log_injury", injuryInput),
+		fakes.Text{S: "Registrato: ci andiamo piano e ci risentiamo tra due giorni."},
+	)
+}

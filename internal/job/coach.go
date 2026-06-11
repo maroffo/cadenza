@@ -87,16 +87,19 @@ type Coach struct {
 	Agent      agent.Coach
 	Wellness   WellnessSource
 	Activities ActivitiesSource
-	Profiles   ProfileSource
-	Rules      RulesSource
-	RuleCount  RuleCounter
-	Muts       MutationProposer
-	Budget     CallBudget
-	Sessions   ConversationStore
-	Chats      ChatState
-	Status     StatusComposer
-	Out        Interactor
-	Confirm    Confirmer
+	// Injuries + InjurySched enable the log_injury tool (nil hides it).
+	Injuries    CoachInjuryStore
+	InjurySched WakeupScheduler
+	Profiles    ProfileSource
+	Rules       RulesSource
+	RuleCount   RuleCounter
+	Muts        MutationProposer
+	Budget      CallBudget
+	Sessions    ConversationStore
+	Chats       ChatState
+	Status      StatusComposer
+	Out         Interactor
+	Confirm     Confirmer
 	// Writer enables write_workout (M6); nil hides the tool entirely.
 	Writer WorkoutWriter
 	Ledger WriteLedger
@@ -370,6 +373,21 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 			},
 		},
 	}
+	if c.Injuries != nil {
+		t["log_injury"] = agent.Tool{
+			Description: "Registra un infortunio o dolore strutturale riferito dall'atleta. " +
+				"Aprirlo ATTIVA protezioni nel verdetto e check programmati a giorno 2/5/7. " +
+				"Solo l'atleta può chiuderlo (bottone Risolto nei check).",
+			Schema: json.RawMessage(`{"type":"object","properties":{
+				"body_part":{"type":"string","maxLength":40},
+				"pain":{"type":"integer","minimum":1,"maximum":10},
+				"notes":{"type":"string","maxLength":200}},
+				"required":["body_part","pain"]}`),
+			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
+				return c.logInjury(ctx, today, input)
+			},
+		}
+	}
 	if c.Writer != nil {
 		t["write_workout"] = agent.Tool{
 			Description: "Scrivi un allenamento strutturato sul calendario intervals.icu. " +
@@ -428,6 +446,72 @@ func (c *Coach) writeWorkout(ctx context.Context, sessionID string, v verdict.Ve
 	}
 	return fmt.Sprintf("Allenamento scritto e VERIFICATO sul calendario: %q il %s (event %d). "+
 		"Conferma all'atleta cosa troverà sull'orologio", p.Title, p.Date, out.EventID), nil
+}
+
+// logInjury opens the injury (tightening: conservative by construction, no
+// confirm needed) and schedules the day-2 check.
+func (c *Coach) logInjury(ctx context.Context, today string, input json.RawMessage) (string, error) {
+	var in struct {
+		BodyPart string `json:"body_part"`
+		Pain     int    `json:"pain"`
+		Notes    string `json:"notes"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil {
+		return "", fmt.Errorf("input non valido: %w", err)
+	}
+	// Server-side bounds: schema maxLength is advisory to the model, and a
+	// long body_part overflows Telegram's 64-byte callback data downstream.
+	in.BodyPart = store.SanitizeRuleText(in.BodyPart)
+	if in.Pain < 1 || in.Pain > 10 || in.BodyPart == "" {
+		return "", fmt.Errorf("body_part obbligatorio e pain in [1,10]")
+	}
+	if len(in.BodyPart) > 30 {
+		return "", fmt.Errorf("body_part oltre 30 caratteri: abbrevialo")
+	}
+	open, err := c.Injuries.ListOpen(ctx)
+	if err == nil && len(open) >= 5 {
+		return "", fmt.Errorf("ci sono già %d infortuni aperti: chiedi all'atleta di chiudere quelli risolti prima di registrarne altri", len(open))
+	}
+	id := store.InjuryID(today, in.BodyPart)
+	inj, err := c.Injuries.Open(ctx, id, store.Injury{
+		BodyPart: in.BodyPart, Pain: in.Pain, Notes: truncate(store.SanitizeRuleText(in.Notes), 200),
+	})
+	if err != nil {
+		slog.Warn("coach: injury open failed", "err", err)
+		return "", fmt.Errorf("registrazione infortunio non riuscita, riprova")
+	}
+	if c.InjurySched != nil && inj != nil {
+		if err := c.InjurySched.ScheduleWakeup(ctx, *inj, 2); err != nil {
+			slog.Warn("coach: injury wakeup schedule failed", "err", err)
+		}
+	}
+	// Truthful: verdict protection has a pain threshold; never overclaim.
+	protection := "protezioni del verdetto ATTIVE (dolore sopra soglia)"
+	if in.Pain < 4 {
+		protection = "monitoraggio attivo (le protezioni automatiche del verdetto scattano da dolore 4+)"
+	}
+	return fmt.Sprintf("Infortunio registrato (%s, dolore %d/10): %s, "+
+		"check programmati a giorno 2/5/7. Dillo all'atleta e ricordagli che solo lui può chiuderlo.",
+		in.BodyPart, in.Pain, protection), nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
+// CoachInjuryStore is the coach's real injury contract: reads AND opens
+// (compile-enforced: a runtime assertion here would panic mid-conversation).
+type CoachInjuryStore interface {
+	InjuryStore
+	Open(ctx context.Context, id string, inj store.Injury) (*store.Injury, error)
+}
+
+// WakeupScheduler is the one InjuryJob method the coach needs.
+type WakeupScheduler interface {
+	ScheduleWakeup(ctx context.Context, inj store.Injury, day int) error
 }
 
 func renderViolations(vs []safety.Violation) string {

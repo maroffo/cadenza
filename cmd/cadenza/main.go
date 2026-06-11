@@ -170,11 +170,17 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 	sender := telegram.NewSender(tgBot, cfg.TelegramChatID)
 
 	runs := store.NewRuns(fsClient)
+	injuries := store.NewInjuries(fsClient)
+	injuryJob := job.InjuryJob{
+		Injuries: injuries, Out: sender, Keyboard: sender, Retry: retry,
+		Now: time.Now, TZ: tz,
+	}
 	morning := job.Morning{
 		Wellness: job.ICU{C: icuClient},
 		Profiles: store.NewProfiles(fsClient),
 		Out:      sender,
 		Runs:     runs,
+		Injuries: injuries,
 		Retry:    retry,
 		Now:      time.Now,
 		TZ:       tz,
@@ -214,8 +220,11 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Now:        time.Now,
 			TZ:         tz,
 		}
+		message.Coach.Injuries = injuries
+		message.Coach.InjurySched = injuryJob
 		message.Muts = store.NewMutations(fsClient)
 	}
+	message.InjuryFlow = &injuryJob
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
-	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message}, nil
+	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, nil
 }

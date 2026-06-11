@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,8 @@ type Message struct {
 	Coach *Coach
 	// Muts resolves pm: confirmation callbacks; nil ignores them.
 	Muts MutationResolver
+	// InjuryFlow handles inj: check-in callbacks; nil ignores them.
+	InjuryFlow *InjuryJob
 }
 
 const dedupTTL = 7 * 24 * time.Hour
@@ -199,8 +202,55 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 			return m.Out.Send(ctx, "Già gestita in precedenza ("+mut.Status+").")
 		}
 	}
+	if id, rev, action, ok := parseInjuryCallback(u.CallbackQuery.Data); ok && m.InjuryFlow != nil {
+		// Stale-revision buttons (resolved/reopened meanwhile) die honestly.
+		cur, err := m.InjuryFlow.Injuries.Get(ctx, id)
+		if err != nil {
+			return fmt.Errorf("message: injury get: %w", err)
+		}
+		if cur == nil || cur.Rev != rev {
+			return m.Out.Send(ctx, "⚠️ Questo bottone si riferisce a uno stato superato dell'infortunio.")
+		}
+		reply, err := m.InjuryFlow.ReactToFeedback(ctx, id, action)
+		if err != nil {
+			if errors.Is(err, store.ErrInjuryNotFound) {
+				return m.Out.Send(ctx, "⚠️ Infortunio non trovato (già rimosso?).")
+			}
+			return fmt.Errorf("message: injury action: %w", err)
+		}
+		return m.Out.Send(ctx, reply)
+	}
 	slog.Info("message: unhandled callback data", "data", u.CallbackQuery.Data)
 	return nil
+}
+
+// parseInjuryCallback decodes "inj:<id>:<rev>:better|same|worse|resolve".
+// The revision rides along so buttons from a superseded state die honestly.
+func parseInjuryCallback(data string) (id string, rev int, action string, ok bool) {
+	rest, found := strings.CutPrefix(data, "inj:")
+	if !found {
+		return "", 0, "", false
+	}
+	lastIdx := strings.LastIndex(rest, ":")
+	if lastIdx <= 0 {
+		return "", 0, "", false
+	}
+	action = rest[lastIdx+1:]
+	switch action {
+	case "better", "same", "worse", "resolve":
+	default:
+		return "", 0, "", false
+	}
+	rest = rest[:lastIdx]
+	revIdx := strings.LastIndex(rest, ":")
+	if revIdx <= 0 {
+		return "", 0, "", false
+	}
+	r, err := strconv.Atoi(rest[revIdx+1:])
+	if err != nil || r < 1 {
+		return "", 0, "", false
+	}
+	return rest[:revIdx], r, action, true
 }
 
 // parseMutationCallback decodes "pm:<id>:y|n".
