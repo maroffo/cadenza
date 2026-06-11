@@ -1,0 +1,30 @@
+{{define "head"}}<!doctype html><html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cadenza</title>
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+<style>
+body{font-family:system-ui;margin:0;background:#0f1419;color:#e6e1cf}
+nav{display:flex;gap:.4rem;flex-wrap:wrap;padding:.7rem 1rem;background:#14191f;position:sticky;top:0}
+nav a{color:#e6e1cf;text-decoration:none;padding:.35rem .7rem;border-radius:.5rem;font-size:.95rem}
+nav a.active,nav a:hover{background:#1f2731}
+main{max-width:52rem;margin:1rem auto;padding:0 1rem}
+.card{background:#14191f;border-radius:.8rem;padding:1rem 1.2rem;margin:.8rem 0;white-space:pre-wrap}
+.go{color:#7fd962}.modify{color:#ffb454}.skip{color:#f07178}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+td,th{padding:.45rem .5rem;border-bottom:1px solid #1f2731;text-align:left;vertical-align:top}
+button,input[type=submit]{background:#1f2731;color:#e6e1cf;border:0;border-radius:.5rem;padding:.4rem .8rem;cursor:pointer}
+input[type=text],input[type=number]{background:#0f1419;color:#e6e1cf;border:1px solid #1f2731;border-radius:.5rem;padding:.45rem .6rem}
+.bubble-u{background:#1f2731;border-radius:.8rem;padding:.6rem .9rem;margin:.4rem 0 .4rem 3rem}
+.bubble-a{background:#14231a;border-radius:.8rem;padding:.6rem .9rem;margin:.4rem 3rem .4rem 0;white-space:pre-wrap}
+small{color:#8a8f98}
+</style></head><body>
+<nav>
+<a href="/app" {{if eq .Page "overview"}}class="active"{{end}}>☀️ Oggi</a>
+<a href="/app/trends" {{if eq .Page "trends"}}class="active"{{end}}>📈 Trend</a>
+<a href="/app/verdicts" {{if eq .Page "verdicts"}}class="active"{{end}}>🚦 Verdetti</a>
+<a href="/app/calendar" {{if eq .Page "calendar"}}class="active"{{end}}>📅 Scritture</a>
+<a href="/app/injuries" {{if eq .Page "injuries"}}class="active"{{end}}>🩹 Infortuni</a>
+<a href="/app/audit" {{if eq .Page "audit"}}class="active"{{end}}>🔍 Audit</a>
+<a href="/app/chat" {{if eq .Page "chat"}}class="active"{{end}}>💬 Coach</a>
+</nav><main>{{end}}
+{{define "foot"}}</main></body></html>{{end}}

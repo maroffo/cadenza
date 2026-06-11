@@ -61,6 +61,8 @@ type Message struct {
 	Muts MutationResolver
 	// InjuryFlow handles inj: check-in callbacks; nil ignores them.
 	InjuryFlow *InjuryJob
+	// WebLink mints dashboard magic links for /web; nil = feature off.
+	WebLink func() string
 }
 
 const dedupTTL = 7 * 24 * time.Hour
@@ -158,6 +160,13 @@ func (m Message) handleMessage(ctx context.Context, u *tgUpdate) error {
 		return m.Out.SendWithVerdict(ctx, body, v)
 	case "/test":
 		return m.Out.SendWithButton(ctx, "Prova di conferma:", "OK ✅", "ping:1")
+	case "/web":
+		if m.WebLink == nil {
+			return m.Out.Send(ctx, "Dashboard non configurata su questo ambiente.")
+		}
+		// The link IS the credential: single-use, 10 minutes, this chat only.
+		return m.Out.Send(ctx, "🔑 Il tuo accesso alla dashboard (singolo uso, vale 10 minuti):\n"+
+			m.WebLink())
 	default:
 		if m.Coach != nil {
 			return m.Coach.Converse(ctx, u.Message.Text)

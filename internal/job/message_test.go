@@ -461,3 +461,30 @@ func TestMessage_FreeTextRoutesToCoachNilKeepsNotice(t *testing.T) {
 		t.Errorf("fallback notice missing: %v", out.plain)
 	}
 }
+
+func TestMessage_WebCommandMintsLink(t *testing.T) {
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.WebLink = func() string { return "https://cadenza.example/app/login?t=abc" }
+
+	if err := m.Run(context.Background(), envelopeFor(t, 80, msgPayload("/web", allowedID))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "/app/login?t=abc") {
+		t.Errorf("link missing: %v", out.plain)
+	}
+	if !strings.Contains(out.plain[0], "singolo uso") {
+		t.Errorf("single-use warning missing: %v", out.plain)
+	}
+}
+
+func TestMessage_WebCommandOffWhenUnconfigured(t *testing.T) {
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	if err := m.Run(context.Background(), envelopeFor(t, 81, msgPayload("/web", allowedID))); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.plain[0], "non configurata") {
+		t.Errorf("off notice missing: %v", out.plain)
+	}
+}

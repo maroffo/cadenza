@@ -65,6 +65,10 @@ gcloud firestore fields ttls update expires_at \
   --collection-group=injuries --enable-ttl --async || true
 gcloud firestore fields ttls update expires_at \
   --collection-group=log --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=web_nonces --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=web_sessions --enable-ttl --async || true
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"
@@ -74,7 +78,7 @@ fi
 
 # ---- Secrets (values added manually; pinned versions referenced by deploy) -----
 say "Secrets (create empty shells; add versions with: gcloud secrets versions add <name> --data-file=-)"
-for S in cadenza-telegram-bot-token cadenza-telegram-webhook-secret cadenza-icu-api-key cadenza-anthropic-api-key; do
+for S in cadenza-telegram-bot-token cadenza-telegram-webhook-secret cadenza-icu-api-key cadenza-anthropic-api-key cadenza-web-session-secret; do
   if ! gcloud secrets describe "$S" >/dev/null 2>&1; then
     gcloud secrets create "$S" --replication-policy=user-managed --locations="$REGION"
   fi

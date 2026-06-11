@@ -267,3 +267,39 @@ func (r *Rules) ActiveTexts(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
+// MutationWithID pairs a mutation with its doc id for the dashboard.
+type MutationWithID struct {
+	ID string
+	Mutation
+}
+
+// RecentMutations lists the latest profile events for the audit page.
+func (m *Mutations) RecentMutations(ctx context.Context, limit int) ([]MutationWithID, error) {
+	docs, err := m.client.Collection(mutationsCollection).
+		OrderBy("created_at", firestore.Desc).Limit(limit).Documents(ctx).GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("mutations recent: %w", err)
+	}
+	out := make([]MutationWithID, 0, len(docs))
+	for _, d := range docs {
+		var mut Mutation
+		if err := d.DataTo(&mut); err != nil {
+			return nil, fmt.Errorf("mutation decode %s: %w", d.Ref.ID, err)
+		}
+		out = append(out, MutationWithID{ID: d.Ref.ID, Mutation: mut})
+	}
+	return out, nil
+}
+
+// Deactivate turns a confirmed rule off (dashboard action: the athlete's
+// explicit choice, the symmetric counterpart of the one-tap confirm).
+func (r *Rules) Deactivate(ctx context.Context, id string) error {
+	_, err := r.client.Collection(rulesCollection).Doc(id).Set(ctx, map[string]any{
+		"active": false, "deactivated_at": time.Now().UTC(),
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("rule deactivate: %w", err)
+	}
+	return nil
+}

@@ -1,0 +1,9 @@
+{{template "head" .}}
+<h2>Scritture sul calendario</h2>
+<table><tr><th>Data</th><th>Titolo</th><th>Stato</th><th>Tentativi</th><th>Diff</th></tr>
+{{range .Writes}}<tr><td>{{.Date}}</td><td>{{.Title}}</td>
+<td>{{if eq .Status "verified"}}<span class="go">verificato</span>{{else}}<span class="skip">{{.Status}}</span>{{end}}</td>
+<td>{{.Attempts}}</td><td>{{range .Diffs}}{{.}}<br>{{end}}</td></tr>
+{{else}}<tr><td colspan="5"><small>Nessuna scrittura ancora.</small></td></tr>{{end}}
+</table>
+{{template "foot" .}}

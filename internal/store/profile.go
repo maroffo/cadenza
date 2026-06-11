@@ -66,3 +66,18 @@ func (p *Profiles) Seed(ctx context.Context, baselines verdict.Baselines, rampCa
 	_, err := p.client.Collection(profileCollection).Doc(profileDocID).Set(ctx, doc)
 	return err
 }
+
+// SetRampCap tightens/sets the materialized ramp cap (dashboard action).
+// The (0, 6] Tier A bound is enforced by the caller AND here.
+func (p *Profiles) SetRampCap(ctx context.Context, cap float64) error {
+	if cap <= 0 || cap > 6 {
+		return fmt.Errorf("ramp_cap %v fuori da (0, 6]", cap)
+	}
+	_, err := p.client.Collection(profileCollection).Doc(profileDocID).Set(ctx, map[string]any{
+		"ramp_cap": cap,
+	}, firestore.MergeAll)
+	if err != nil {
+		return fmt.Errorf("profile ramp cap: %w", err)
+	}
+	return nil
+}

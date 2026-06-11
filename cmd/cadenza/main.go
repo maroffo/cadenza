@@ -27,6 +27,7 @@ import (
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/telegram"
+	"github.com/maroffo/cadenza/internal/web"
 )
 
 func main() {
@@ -117,9 +118,13 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 		Enqueue:       enq,
 	}
 
+	rootMux := server.New(server.Deps{Executor: executor, Webhook: webhook})
+	if webServer != nil {
+		webServer.Register(rootMux.(*http.ServeMux))
+	}
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           server.New(server.Deps{Executor: executor, Webhook: webhook}),
+		Handler:           rootMux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		// Bounds slow readers without killing legitimate executor runs,
@@ -145,6 +150,36 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 		slog.Info("cadenza stopped")
 		return nil
 	}
+}
+
+// webServer is set by buildJobs when the dashboard is enabled; run() mounts it.
+var webServer *web.Server
+
+// webHistory adapts the chat page to the chats+sessions stores.
+type webHistory struct {
+	chats    *store.Chats
+	sessions *store.Sessions
+}
+
+func (h webHistory) ActiveTurns(ctx context.Context, limit int) ([]store.Turn, error) {
+	return store.ActiveTurns(ctx, h.chats, h.sessions, limit)
+}
+
+// webAudit aggregates the transparency sources for the audit page.
+type webAudit struct {
+	ledger *store.Ledger
+	muts   *store.Mutations
+	budget *store.Budget
+}
+
+func (a webAudit) RecentWrites(ctx context.Context, limit int) ([]store.WriteRecord, error) {
+	return a.ledger.RecentWrites(ctx, limit)
+}
+func (a webAudit) RecentMutations(ctx context.Context, limit int) ([]store.MutationWithID, error) {
+	return a.muts.RecentMutations(ctx, limit)
+}
+func (a webAudit) SpentToday(ctx context.Context, date string) (int, error) {
+	return a.budget.SpentToday(ctx, date)
 }
 
 func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueuer) (job.Deps, error) {
@@ -225,6 +260,35 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		message.Muts = store.NewMutations(fsClient)
 	}
 	message.InjuryFlow = &injuryJob
+	// M8 dashboard: enabled when the web secret exists.
+	if cfg.WebSessionSecret != "" && cfg.ExecutorAudience != "" {
+		webAuth := web.Auth{
+			Secret:   []byte(cfg.WebSessionSecret),
+			Sessions: store.NewWebSessions(fsClient),
+			BaseURL:  cfg.ExecutorAudience,
+			Now:      time.Now,
+		}
+		message.WebLink = webAuth.MintLink
+		webChats := store.NewChats(fsClient)
+		webSessions := store.NewSessions(fsClient)
+		webServer = &web.Server{
+			Auth:     webAuth,
+			ICU:      icuClient,
+			Status:   morning,
+			Chat:     message.Coach,
+			History:  webHistory{chats: webChats, sessions: webSessions},
+			Injuries: injuries,
+			Rules:    store.NewRules(fsClient),
+			Profiles: store.NewProfiles(fsClient),
+			Audit: webAudit{
+				ledger: store.NewLedger(fsClient),
+				muts:   store.NewMutations(fsClient),
+				budget: store.NewBudget(fsClient),
+			},
+			Now: time.Now,
+			TZ:  tz,
+		}
+	}
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
 	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, nil
 }

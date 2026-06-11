@@ -53,3 +53,20 @@ func (b *Budget) Spend(ctx context.Context, date string, limit int) (bool, error
 	}
 	return allowed, nil
 }
+
+// SpentToday reads the day's deep-tier counter (dashboard transparency).
+func (b *Budget) SpentToday(ctx context.Context, date string) (int, error) {
+	snap, err := b.client.Collection(budgetCollection).Doc(date).Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("budget read: %w", err)
+	}
+	if v, err := snap.DataAt("count"); err == nil {
+		if n, ok := v.(int64); ok {
+			return int(n), nil
+		}
+	}
+	return 0, nil
+}

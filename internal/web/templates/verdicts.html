@@ -1,0 +1,9 @@
+{{template "head" .}}
+<h2>Storia dei verdetti (30 giorni)</h2>
+<div class="card"><small>Ricomputati ora con le soglie di OGGI: la storia è dei dati, le soglie sono attuali.</small></div>
+<table><tr><th>Data</th><th>Verdetto</th><th>Motivi</th></tr>
+{{range .Rows}}<tr><td>{{.Date}}</td>
+<td class="{{if eq .Kind "GO"}}go{{else if eq .Kind "MODIFY"}}modify{{else}}skip{{end}}">{{.Kind}}</td>
+<td>{{range .Reasons}}{{.Message}} ({{.Observed}} vs {{.Threshold}})<br>{{end}}</td></tr>{{end}}
+</table>
+{{template "foot" .}}

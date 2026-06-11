@@ -86,6 +86,23 @@ func (s *Sessions) AppendTurn(ctx context.Context, sessionID string, seq int, ro
 	return nil
 }
 
+// ActiveTurns returns the latest turns of the chat's active session: the
+// web chat page mirrors what the bot conversation sees.
+func ActiveTurns(ctx context.Context, chats *Chats, sessions *Sessions, limit int) ([]Turn, error) {
+	id, err := chats.ActiveSession(ctx)
+	if err != nil || id == "" {
+		return nil, err
+	}
+	turns, err := sessions.LoadTurns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(turns) > limit {
+		turns = turns[len(turns)-limit:]
+	}
+	return turns, nil
+}
+
 // LoadTurns returns the session turns in order. ANY decode failure returns
 // an error: callers must treat it as "start a fresh session", never crash
 // and never trust a partial history.

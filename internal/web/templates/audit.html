@@ -1,0 +1,18 @@
+{{template "head" .}}
+<h2>Audit e trasparenza</h2>
+<div class="card"><b>Profilo</b><br>
+Baseline HRV {{printf "%.1f" .Baselines.HRVMean}} (SD {{printf "%.1f" .Baselines.HRVSD}}) · FC riposo {{printf "%.1f" .Baselines.RestingHR}} · Tetto rampa {{printf "%.1f" .RampCap}}/sett
+<form method="post" action="/app/profile/rampcap" style="margin-top:.6rem">
+<input type="number" name="ramp_cap" step="0.1" min="0.1" max="6" value="{{printf "%.1f" .RampCap}}">
+<input type="submit" value="Aggiorna tetto rampa (max 6.0, Tier A)">
+</form></div>
+<div class="card"><b>Budget Opus oggi</b>: {{.Spent}}/40 chiamate</div>
+<h3>Regole attive</h3>
+<table>{{range .Rules}}<tr><td>«{{.Text}}»</td>
+<td><form method="post" action="/app/rules/deactivate"><input type="hidden" name="id" value="{{.ID}}"><input type="submit" value="Disattiva"></form></td></tr>
+{{else}}<tr><td><small>Nessuna regola confermata.</small></td></tr>{{end}}</table>
+<h3>Mutazioni profilo (ultime 20)</h3>
+<table><tr><th>Quando</th><th>Tipo</th><th>Valore</th><th>Stato</th><th>Citazione</th></tr>
+{{range .Mutations}}<tr><td>{{.CreatedAt.Format "02/01 15:04"}}</td><td>{{.Kind}}</td><td>{{.NewValue}}</td><td>{{.Status}}</td><td><small>«{{.SourceQuote}}»</small></td></tr>{{end}}
+</table>
+{{template "foot" .}}
