@@ -18,13 +18,17 @@ type Config struct {
 	ICURatePerSec float64 // overrides the client default only when ICU_RATE_PER_SEC is set
 	AthleteTZ     string
 
-	TelegramBotToken string
-	TelegramChatID   int64 // manual until M3 persists it at /start
+	TelegramBotToken      string
+	TelegramChatID        int64  // also the allowlisted user id (private chat: equal)
+	TelegramWebhookSecret string // X-Telegram-Bot-Api-Secret-Token
 
 	// Executor OIDC: audience is the service URL without query params,
 	// invoker is the cadenza-invoker@ service account email.
 	ExecutorAudience string
 	InvokerEmail     string
+
+	// Cloud Tasks queue path: projects/<p>/locations/<l>/queues/<q>.
+	TasksQueuePath string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -56,19 +60,23 @@ func Load(getenv func(string) string) (*Config, error) {
 		cfg.TelegramChatID = id
 	}
 	cfg.TelegramBotToken = getenv("TELEGRAM_BOT_TOKEN")
+	cfg.TelegramWebhookSecret = getenv("TELEGRAM_WEBHOOK_SECRET")
 	cfg.ExecutorAudience = getenv("EXECUTOR_AUDIENCE")
 	cfg.InvokerEmail = getenv("INVOKER_EMAIL")
+	cfg.TasksQueuePath = getenv("TASKS_QUEUE_PATH")
 
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)
 	}
 	if cfg.Env == "prod" {
 		required := map[string]string{
-			"GCP_PROJECT":        cfg.GCPProject,
-			"ICU_API_KEY":        cfg.ICUAPIKey,
-			"TELEGRAM_BOT_TOKEN": cfg.TelegramBotToken,
-			"EXECUTOR_AUDIENCE":  cfg.ExecutorAudience,
-			"INVOKER_EMAIL":      cfg.InvokerEmail,
+			"GCP_PROJECT":             cfg.GCPProject,
+			"ICU_API_KEY":             cfg.ICUAPIKey,
+			"TELEGRAM_BOT_TOKEN":      cfg.TelegramBotToken,
+			"TELEGRAM_WEBHOOK_SECRET": cfg.TelegramWebhookSecret,
+			"EXECUTOR_AUDIENCE":       cfg.ExecutorAudience,
+			"INVOKER_EMAIL":           cfg.InvokerEmail,
+			"TASKS_QUEUE_PATH":        cfg.TasksQueuePath,
 		}
 		for name, v := range required {
 			if v == "" {

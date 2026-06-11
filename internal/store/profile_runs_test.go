@@ -75,3 +75,38 @@ func TestRuns_MorningLifecycle(t *testing.T) {
 		t.Fatal("marked date reports not completed")
 	}
 }
+
+func TestChats_SaveAndGet(t *testing.T) {
+	client := emulatorClient(t)
+	c := NewChats(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := c.Save(ctx, 424242, 424242); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	chatID, userID, err := c.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if chatID != 424242 || userID != 424242 {
+		t.Errorf("got chat=%d user=%d, want 424242/424242", chatID, userID)
+	}
+}
+
+func TestChats_GetBeforeStartReturnsZeros(t *testing.T) {
+	client := emulatorClient(t)
+	c := NewChats(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Force the not-found branch even on a long-lived emulator.
+	_, _ = client.Collection("state").Doc("chat").Delete(ctx)
+	chatID, userID, err := c.Get(ctx)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if chatID != 0 || userID != 0 {
+		t.Errorf("got chat=%d user=%d, want zeros (/start never happened)", chatID, userID)
+	}
+}

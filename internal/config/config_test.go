@@ -67,20 +67,23 @@ func TestLoad_InvalidEnvRejected(t *testing.T) {
 
 func completeProdEnv() map[string]string {
 	return map[string]string{
-		"ENV":                "prod",
-		"GCP_PROJECT":        "p",
-		"ICU_API_KEY":        "k",
-		"TELEGRAM_BOT_TOKEN": "t",
-		"TELEGRAM_CHAT_ID":   "424242",
-		"EXECUTOR_AUDIENCE":  "https://cadenza.example.run.app",
-		"INVOKER_EMAIL":      "cadenza-invoker@p.iam.gserviceaccount.com",
+		"ENV":                     "prod",
+		"GCP_PROJECT":             "p",
+		"ICU_API_KEY":             "k",
+		"TELEGRAM_BOT_TOKEN":      "t",
+		"TELEGRAM_CHAT_ID":        "424242",
+		"TELEGRAM_WEBHOOK_SECRET": "s",
+		"EXECUTOR_AUDIENCE":       "https://cadenza.example.run.app",
+		"INVOKER_EMAIL":           "cadenza-invoker@p.iam.gserviceaccount.com",
+		"TASKS_QUEUE_PATH":        "projects/p/locations/europe-west1/queues/cadenza-exec",
 	}
 }
 
 func TestLoad_ProdRequirements(t *testing.T) {
 	for _, missing := range []string{
 		"GCP_PROJECT", "ICU_API_KEY", "TELEGRAM_BOT_TOKEN",
-		"TELEGRAM_CHAT_ID", "EXECUTOR_AUDIENCE", "INVOKER_EMAIL",
+		"TELEGRAM_CHAT_ID", "TELEGRAM_WEBHOOK_SECRET",
+		"EXECUTOR_AUDIENCE", "INVOKER_EMAIL", "TASKS_QUEUE_PATH",
 	} {
 		t.Run("missing "+missing+" rejected", func(t *testing.T) {
 			m := completeProdEnv()
