@@ -37,9 +37,13 @@
      --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/iam.serviceAccountUser
    ```
    Then set repo secrets `GCP_PROJECT`, `GCP_PROJECT_NUMBER`, `TELEGRAM_CHAT_ID`.
-4. **First deploy**: push to `main` (deploy.yml) or run the gcloud command setup.sh prints.
-5. **Re-run `deploy/setup.sh`**: with the service URL now known it creates Scheduler jobs, invoker binding, alert policies.
-6. **Anthropic spend cap** (before M4): set the monthly limit in the Anthropic console.
+4. **Enable deploys** (the workflow is gated off until the project exists):
+   ```bash
+   gh variable set DEPLOY_ENABLED --body true
+   ```
+5. **First deploy**: push to `main` (deploy.yml) or run the gcloud command setup.sh prints.
+6. **Re-run `deploy/setup.sh`**: with the service URL now known it creates Scheduler jobs, invoker binding, alert policies.
+7. **Anthropic spend cap** (before M4): set the monthly limit in the Anthropic console.
 
 ## Verification after bootstrap (M2 checkpoint)
 

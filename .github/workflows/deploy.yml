@@ -12,6 +12,11 @@ env:
 
 jobs:
   deploy:
+    # Gated until the GCP project exists: enable with
+    #   gh variable set DEPLOY_ENABLED --body true
+    # A skipped deploy keeps main green; a red one trains everyone to
+    # ignore failures on the branch that matters.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
