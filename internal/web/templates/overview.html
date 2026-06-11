@@ -1,7 +1,7 @@
 {{template "head" .}}
 <h2>Il quadro di oggi</h2>
 {{if .Err}}<div class="card">⚠️ intervals.icu non disponibile in questo momento.</div>
-{{else}}<div class="card">{{.Body}}
+{{else}}<div class="card">{{coachhtml .Body}}
 
-{{.Block}}</div>{{end}}
+{{coachhtml .Block}}</div>{{end}}
 {{template "foot" .}}

@@ -23,7 +23,9 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-var tmpl = template.Must(template.ParseFS(templateFS, "templates/*.html"))
+var tmpl = template.Must(template.New("").
+	Funcs(template.FuncMap{"coachhtml": coachHTML}).
+	ParseFS(templateFS, "templates/*.html"))
 
 // StatusComposer mirrors the job-layer seam (deterministic daily picture).
 type StatusComposer interface {
