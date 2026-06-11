@@ -5,6 +5,10 @@ package icu
 
 import "encoding/json"
 
+// DefaultBaseURL is the production API root; lives here (cadenza-owned file)
+// so the copied client files stay pristine.
+const DefaultBaseURL = "https://intervals.icu/api/v1"
+
 // Wellness is one day of wellness data. intervals.icu omits null fields
 // entirely, so every optional metric is a pointer: nil means "not synced",
 // which must never be read as 0 (a 0 HRV would trip every verdict rule).

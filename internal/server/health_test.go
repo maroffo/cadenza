@@ -10,7 +10,7 @@ import (
 )
 
 func TestHealthz(t *testing.T) {
-	h := New()
+	h := New(Deps{})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	if rec.Code != http.StatusOK {
@@ -22,7 +22,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestUnknownRouteIs404(t *testing.T) {
-	h := New()
+	h := New(Deps{})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	if rec.Code != http.StatusNotFound {
@@ -32,7 +32,7 @@ func TestUnknownRouteIs404(t *testing.T) {
 
 func TestHealthzWrongMethodIs405(t *testing.T) {
 	// Pins the method-scoped route contract before POST routes arrive (M2/M3).
-	h := New()
+	h := New(Deps{})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/healthz", nil))
 	if rec.Code != http.StatusMethodNotAllowed {
