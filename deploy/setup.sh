@@ -143,19 +143,24 @@ if [ -z "$CHANNEL" ]; then
     --type=email --channel-labels="email_address=${ALERT_EMAIL}" --format='value(name)')
 fi
 ensure_policy() {
-  local DISPLAY="$1" FILTER="$2"
-  if ! gcloud alpha monitoring policies list --filter="displayName='${DISPLAY}'" --format='value(name)' | grep -q .; then
-    gcloud alpha monitoring policies create \
-      --display-name="$DISPLAY" --notification-channels="$CHANNEL" \
-      --condition-display-name="$DISPLAY" \
-      --condition-filter="$FILTER" \
-      --aggregation='{"alignmentPeriod":"300s","perSeriesAligner":"ALIGN_COUNT"}' \
-      --duration=0s --if=">0" --combiner=OR >/dev/null
-  fi
+  # REST API: gcloud's "alpha monitoring" prompts to install a component,
+  # which kills non-interactive runs. Idempotent by displayName check.
+  local NAME="$1" FILTER="$2"
+  local TOKEN; TOKEN=$(gcloud auth print-access-token)
+  local EXISTING
+  EXISTING=$(curl -fsS "https://monitoring.googleapis.com/v3/projects/${PROJECT}/alertPolicies?filter=display_name%3D%22${NAME// /%20}%22" \
+    -H "Authorization: Bearer $TOKEN" | grep -c '"name"' || true)
+  if [ "$EXISTING" -gt 0 ]; then return 0; fi
+  curl -fsS -X POST "https://monitoring.googleapis.com/v3/projects/${PROJECT}/alertPolicies" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"displayName\":\"$NAME\",\"combiner\":\"OR\",\"notificationChannels\":[\"$CHANNEL\"],
+         \"conditions\":[{\"displayName\":\"$NAME\",\"conditionThreshold\":{
+           \"filter\":\"$FILTER\",\"comparison\":\"COMPARISON_GT\",\"thresholdValue\":0,
+           \"duration\":\"0s\",\"aggregations\":[{\"alignmentPeriod\":\"300s\",\"perSeriesAligner\":\"ALIGN_COUNT\"}]}}]}" >/dev/null
 }
 ensure_policy "cadenza scheduler failures" \
-  'metric.type="logging.googleapis.com/log_entry_count" resource.type="cloud_scheduler_job" severity>=ERROR'
+  'metric.type=\"logging.googleapis.com/log_entry_count\" AND resource.type=\"cloud_scheduler_job\" AND metric.label.severity=\"ERROR\"'
 ensure_policy "cadenza watchdog errors" \
-  'metric.type="logging.googleapis.com/log_entry_count" resource.type="cloud_run_revision" resource.label."service_name"="'"$SERVICE"'" severity>=ERROR'
+  'metric.type=\"logging.googleapis.com/log_entry_count\" AND resource.type=\"cloud_run_revision\" AND resource.label.service_name=\"'"$SERVICE"'\" AND metric.label.severity=\"ERROR\"'
 
 say "Done. Remaining manual steps: see deploy/README.md"
