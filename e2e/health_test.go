@@ -1,4 +1,4 @@
-// ABOUTME: End-to-end boot test: the real handler serves /healthz over real HTTP.
+// ABOUTME: End-to-end boot test: the real handler serves /health over real HTTP.
 // ABOUTME: Grows into full scenario tests (emulator + fakes) from M2 onward.
 
 //go:build e2e
@@ -14,13 +14,13 @@ import (
 	"github.com/maroffo/cadenza/internal/server"
 )
 
-func TestBoot_HealthzOverHTTP(t *testing.T) {
+func TestBoot_HealthOverHTTP(t *testing.T) {
 	ts := httptest.NewServer(server.New(server.Deps{}))
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/healthz")
+	resp, err := http.Get(ts.URL + "/health")
 	if err != nil {
-		t.Fatalf("GET /healthz: %v", err)
+		t.Fatalf("GET /health: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

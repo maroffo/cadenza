@@ -9,9 +9,14 @@ GOVULNCHECK ?= $(shell command -v govulncheck 2>/dev/null || echo "$$(go env GOP
 # commit, so Go targets are conditional on go.mod existing.
 GO_READY := $(wildcard go.mod)
 
-.PHONY: check lint vet fmt-check vuln test test-e2e emulator
+.PHONY: check lint vet fmt-check vuln test test-e2e emulator sh-check
 
-check: lint vet fmt-check vuln test
+check: lint vet fmt-check vuln test sh-check
+
+# Shell scripts get at least a parse check; nothing ships unparseable again.
+sh-check:
+	@for f in deploy/*.sh; do bash -n "$$f" || exit 1; done
+	@echo "sh-check: ok"
 
 # Firestore emulator via Docker (the gcloud component needs a Java JRE; Docker doesn't).
 # Tests pick it up with FIRESTORE_EMULATOR_HOST=localhost:8090.
