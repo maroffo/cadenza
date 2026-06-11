@@ -215,21 +215,38 @@ func toolParams(tools Tools) ([]anthropic.ToolUnionParam, error) {
 	out := make([]anthropic.ToolUnionParam, 0, len(tools))
 	for _, name := range slices.Sorted(maps.Keys(tools)) {
 		t := tools[name]
-		var schema struct {
-			Properties any      `json:"properties"`
-			Required   []string `json:"required"`
-		}
+		var schema map[string]any
 		if err := json.Unmarshal(t.Schema, &schema); err != nil {
 			// Schemas are developer-authored constants: a malformed one must
 			// fail loudly, not register a tool the model free-forms inputs for.
 			return nil, fmt.Errorf("agent: tool %q schema: %w", name, err)
 		}
+		var required []string
+		if rs, ok := schema["required"].([]any); ok {
+			for _, r := range rs {
+				if str, ok := r.(string); ok {
+					required = append(required, str)
+				}
+			}
+		}
+		// Everything beyond properties/required ($defs, additionalProperties,
+		// oneOf refs) rides through ExtraFields: dropping them would hand the
+		// model an unconstrained schema with dangling $ref.
+		extra := map[string]any{}
+		for k, v := range schema {
+			switch k {
+			case "properties", "required", "type":
+			default:
+				extra[k] = v
+			}
+		}
 		tp := anthropic.ToolParam{
 			Name:        name,
 			Description: anthropic.String(t.Description),
 			InputSchema: anthropic.ToolInputSchemaParam{
-				Properties: schema.Properties,
-				Required:   schema.Required,
+				Properties:  schema["properties"],
+				Required:    required,
+				ExtraFields: extra,
 			},
 		}
 		out = append(out, anthropic.ToolUnionParam{OfTool: &tp})

@@ -77,7 +77,9 @@ func TestWorkoutWrite_EndToEnd(t *testing.T) {
 		{"minutes":10,"hr":{"zone_start":1,"zone_end":2},"intensity":"warmup"},
 		{"minutes":30,"hr":{"zone":2}},
 		{"minutes":10,"hr":{"zone":1},"intensity":"cooldown"}]}`, today)
+	overbounds := fmt.Sprintf(`{"date":%q,"sport":"Run","title":"folle","items":[{"minutes":120,"hr":{"zone":5}}]}`, today)
 	llm := fakes.NewAnthropic(
+		fakes.Call("tu_bad", "write_workout", overbounds),
 		fakes.Call("tu_wr", "write_workout", planJSON),
 		fakes.Text{S: "Scritto: progressivo da 50 minuti, lo trovi sull'orologio."},
 	)
@@ -121,9 +123,20 @@ func TestWorkoutWrite_EndToEnd(t *testing.T) {
 		t.Fatalf("Converse: %v", err)
 	}
 
-	// The event reached the fake calendar with the structured doc and no description.
+	// The over-bounds plan died at the gate: exactly ONE event upserted, the
+	// regenerated sane one (plan-promised: gate-reject-regen-pass e2e).
+	if len(llm.Requests) != 3 {
+		t.Fatalf("llm calls = %d, want 3 (reject, regen, final)", len(llm.Requests))
+	}
+	rejectMsg, _ := json.Marshal(llm.Requests[1].Messages)
+	if !strings.Contains(string(rejectMsg), "RIFIUTATO") {
+		t.Errorf("gate rejection not in the regen turn:\n%s", rejectMsg)
+	}
 	if storedEvent == nil {
 		t.Fatal("no event upserted")
+	}
+	if name, _ := storedEvent["name"].(string); name != "Progressivo" {
+		t.Fatalf("stored event = %q, want only the regenerated plan", name)
 	}
 	if _, has := storedEvent["description"]; has {
 		t.Fatal("event carries description (doc clobber trap)")
@@ -137,14 +150,16 @@ func TestWorkoutWrite_EndToEnd(t *testing.T) {
 		t.Errorf("external_id = %q", extID)
 	}
 
-	// Ledger records the verified outcome on the emulator.
-	snap, err := fsClient.Collection("events_written").Doc(extID).Get(ctx)
-	if err != nil {
-		t.Fatalf("ledger doc: %v", err)
+	// Ledger records the verified outcome (keyed extID+contentHash so
+	// superseded plans keep their own audit lines).
+	docs, err := fsClient.Collection("events_written").
+		Where("external_id", "==", extID).Documents(ctx).GetAll()
+	if err != nil || len(docs) != 1 {
+		t.Fatalf("ledger docs = %d, %v; want 1", len(docs), err)
 	}
 	var rec store.WriteRecord
-	_ = snap.DataTo(&rec)
-	if rec.Status != "verified" || rec.EventID != 777 {
+	_ = docs[0].DataTo(&rec)
+	if rec.Status != "verified" || rec.EventID != 777 || rec.ContentHash == "" {
 		t.Errorf("ledger = %+v", rec)
 	}
 

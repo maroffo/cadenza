@@ -37,6 +37,7 @@ type fakeICU struct {
 	mangleNext int
 	srv        *httptest.Server
 	lastDoc    map[string]any
+	lastEvent  map[string]any
 }
 
 func newFakeICU(t *testing.T) *fakeICU {
@@ -48,6 +49,7 @@ func newFakeICU(t *testing.T) *fakeICU {
 			var events []map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&events)
 			if len(events) == 1 {
+				f.lastEvent = events[0]
 				f.lastDoc, _ = events[0]["workout_doc"].(map[string]any)
 			}
 			_, _ = fmt.Fprint(w, `[{"id":555}]`)
@@ -63,8 +65,8 @@ func newFakeICU(t *testing.T) *fakeICU {
 			// external_id round trip: serve whatever the upsert stored.
 			var resp []map[string]any
 			_ = json.Unmarshal(out, &resp)
-			if len(resp) == 1 {
-				resp[0]["external_id"] = f.lastExternalID()
+			if len(resp) == 1 && f.lastEvent != nil {
+				resp[0]["external_id"] = f.lastEvent["external_id"]
 			}
 			_ = json.NewEncoder(w).Encode(resp)
 		default:
@@ -73,13 +75,6 @@ func newFakeICU(t *testing.T) *fakeICU {
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
-}
-
-func (f *fakeICU) lastExternalID() string {
-	// The writer computes it deterministically; recompute the same way.
-	p := testPlan()
-	doc, _ := p.BuildDoc()
-	return ExternalID(p, doc)
 }
 
 func TestWriteVerified_CleanFirstAttempt(t *testing.T) {
@@ -154,21 +149,32 @@ func TestDiffDoc_Catches(t *testing.T) {
 	}
 }
 
-func TestExternalID_DeterministicAndDateScoped(t *testing.T) {
+func TestExternalID_SlotKeyedGolden(t *testing.T) {
+	// Golden literal: the id is the upsert slot. A regenerated plan for the
+	// same day/sport MUST reuse it (overwrite, never orphan a second event).
+	if got := ExternalID(testPlan()); got != "cadenza-2026-06-25-run" {
+		t.Fatalf("ExternalID = %q, want cadenza-2026-06-25-run", got)
+	}
+	p2 := testPlan()
+	p2.Title = "Rigenerato più corto"
+	if ExternalID(p2) != ExternalID(testPlan()) {
+		t.Fatal("regenerated plan got a new slot id (orphan event on the calendar)")
+	}
+}
+
+func TestBuildDoc_DeterministicBytes(t *testing.T) {
+	// ContentHash (ledger) and upsert idempotency depend on stable bytes.
 	p := testPlan()
-	doc, _ := p.BuildDoc()
-	a, b := ExternalID(p, doc), ExternalID(p, doc)
-	if a != b {
-		t.Fatalf("not deterministic: %s vs %s", a, b)
+	a, err := p.BuildDoc()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasPrefix(a, "cadenza-2026-06-25-") {
-		t.Errorf("id %q not date-scoped", a)
+	b, _ := p.BuildDoc()
+	if string(a) != string(b) {
+		t.Fatalf("BuildDoc not byte-deterministic:\n%s\n%s", a, b)
 	}
-	p2 := p
-	p2.Title = "Altro"
-	doc2, _ := p2.BuildDoc()
-	if ExternalID(p2, doc2) == a {
-		t.Error("different content, same id")
+	if ContentHash(a) != ContentHash(b) {
+		t.Fatal("ContentHash diverges on identical plans")
 	}
 }
 
@@ -193,5 +199,82 @@ func TestWriteVerified_NoDescriptionField(t *testing.T) {
 	_, _ = w.WriteVerified(context.Background(), testPlan())
 	if strings.Contains(string(captured), `"description"`) {
 		t.Fatalf("payload carries description:\n%s", captured)
+	}
+}
+
+func TestDiffDoc_ZoneAndRangeTampering(t *testing.T) {
+	p := testPlan()
+	doc, _ := p.BuildDoc()
+
+	tamper := func(mutate func(map[string]any)) map[string]any {
+		var m map[string]any
+		_ = json.Unmarshal(doc, &m)
+		mutate(m)
+		return m
+	}
+	// Flat zone value changed (repeat sub-step Z4 -> Z2).
+	zoneTampered := tamper(func(m map[string]any) {
+		rep := m["steps"].([]any)[1].(map[string]any)
+		rep["steps"].([]any)[0].(map[string]any)["hr"].(map[string]any)["value"] = 2.0
+	})
+	if diffs := DiffDoc(p, zoneTampered); len(diffs) == 0 {
+		t.Fatal("zone tampering not flagged")
+	}
+	// Range lower bound lost (warmup Z1-2 flattened to start=2).
+	startTampered := tamper(func(m map[string]any) {
+		m["steps"].([]any)[0].(map[string]any)["hr"].(map[string]any)["start"] = 2.0
+	})
+	if diffs := DiffDoc(p, startTampered); len(diffs) == 0 {
+		t.Fatal("range lower-bound tampering not flagged")
+	}
+}
+
+func TestWriteVerified_VerifiedOnExactlyLastAttempt(t *testing.T) {
+	f := newFakeICU(t)
+	f.mangleNext = maxWriteAttempts - 1
+	w := &Writer{C: icu.New(f.srv.URL, "k", "0")}
+
+	out, err := w.WriteVerified(context.Background(), testPlan())
+	if err != nil {
+		t.Fatalf("WriteVerified: %v", err)
+	}
+	if out.Status != Verified || out.Attempts != maxWriteAttempts {
+		t.Fatalf("outcome = %+v, want verified on the LAST attempt", out)
+	}
+}
+
+func TestWriteVerified_UpstreamFailuresSurfaceAsErrors(t *testing.T) {
+	cases := map[string]http.HandlerFunc{
+		"upsert 500": func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		},
+		"readback fails": func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/bulk") {
+				_, _ = fmt.Fprint(w, `[{"id":1}]`)
+				return
+			}
+			http.Error(w, "boom", http.StatusInternalServerError)
+		},
+		"event vanished": func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/bulk") {
+				_, _ = fmt.Fprint(w, `[{"id":1}]`)
+				return
+			}
+			_, _ = fmt.Fprint(w, `[]`)
+		},
+	}
+	for name, handler := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(handler)
+			defer srv.Close()
+			w := &Writer{C: icu.New(srv.URL, "k", "0", icu.WithMaxRetries(0))}
+			out, err := w.WriteVerified(context.Background(), testPlan())
+			if err == nil {
+				t.Fatalf("%s: error swallowed (outcome %+v)", name, out)
+			}
+			if out.Status == Verified {
+				t.Fatalf("%s: verified on a failing upstream", name)
+			}
+		})
 	}
 }

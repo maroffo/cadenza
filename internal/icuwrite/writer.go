@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"strings"
 
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/workout"
@@ -37,11 +38,18 @@ type Writer struct {
 	C *icu.Client
 }
 
-// ExternalID is deterministic on date+content: a task retry upserts the same
-// event instead of duplicating it (spike-verified under API-key auth).
-func ExternalID(p workout.Plan, doc json.RawMessage) string {
-	sum := sha256.Sum256(append([]byte(p.Date+"|"+p.Title+"|"), doc...))
-	return fmt.Sprintf("cadenza-%s-%x", p.Date, sum[:4])
+// ExternalID is keyed by SLOT (date+sport), not content: a regenerated plan
+// for the same day upserts OVER its predecessor instead of orphaning a
+// second prescriptive event on the calendar. Content history lives in the
+// ledger, not in the event id.
+func ExternalID(p workout.Plan) string {
+	return fmt.Sprintf("cadenza-%s-%s", p.Date, strings.ToLower(p.Sport))
+}
+
+// ContentHash fingerprints the plan bytes for the audit ledger.
+func ContentHash(doc json.RawMessage) string {
+	sum := sha256.Sum256(doc)
+	return fmt.Sprintf("%x", sum[:4])
 }
 
 // WriteVerified writes the plan and verifies what intervals.icu actually
@@ -53,7 +61,7 @@ func (w *Writer) WriteVerified(ctx context.Context, p workout.Plan) (Outcome, er
 	if err != nil {
 		return Outcome{}, fmt.Errorf("icuwrite: build: %w", err)
 	}
-	extID := ExternalID(p, doc)
+	extID := ExternalID(p)
 	var docObj map[string]any
 	if err := json.Unmarshal(doc, &docObj); err != nil {
 		return Outcome{}, fmt.Errorf("icuwrite: doc decode: %w", err)
@@ -143,13 +151,19 @@ func DiffDoc(p workout.Plan, stored map[string]any) []string {
 		if gs.zoneTop != wantZone {
 			diffs = append(diffs, fmt.Sprintf("step %d: zona attesa Z%d, trovata Z%d", i+1, wantZone, gs.zoneTop))
 		}
+		// Range targets: the stored lower bound must survive too (a Z1-2
+		// warmup flattened to plain Z2 changes the prescription).
+		if ws.HR.ZoneStart != 0 && gs.zoneStart != ws.HR.ZoneStart {
+			diffs = append(diffs, fmt.Sprintf("step %d: inizio range atteso Z%d, trovato Z%d", i+1, ws.HR.ZoneStart, gs.zoneStart))
+		}
 	}
 	return diffs
 }
 
 type storedStep struct {
-	duration float64
-	zoneTop  int
+	duration  float64
+	zoneTop   int
+	zoneStart int
 }
 
 func flattenStored(doc map[string]any) []storedStep {
@@ -186,6 +200,9 @@ func parseStored(m map[string]any) storedStep {
 			s.zoneTop = int(v)
 		} else if e, ok := hr["end"].(float64); ok {
 			s.zoneTop = int(e)
+		}
+		if st, ok := hr["start"].(float64); ok {
+			s.zoneStart = int(st)
 		}
 	}
 	return s

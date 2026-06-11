@@ -59,6 +59,8 @@ gcloud firestore fields ttls update expires_at \
   --collection-group=turns --enable-ttl --async || true
 gcloud firestore fields ttls update expires_at \
   --collection-group=profile_events --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=events_written --enable-ttl --async || true
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"

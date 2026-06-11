@@ -81,9 +81,11 @@ func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
 		return d
 	}
 
-	// Verdict coupling (decision 13): the model cannot out-prescribe the
-	// deterministic verdict, today or any day it writes for.
-	if v.Kind == verdict.Skip {
+	// Verdict coupling (decision 13) applies to TODAY's plan only: the
+	// calendar is a plan, the morning verdict is the execution gate, and
+	// tomorrow's readiness is unknowable today (D29). Future dates remain
+	// bounded by Tier A.
+	if p.Date == today && v.Kind == verdict.Skip {
 		for _, s := range p.Flatten() {
 			if zoneTop(s) > 1 {
 				block("verdetto SKIP", fmt.Sprintf("step a Z%d", zoneTop(s)), "solo Z1 in un giorno SKIP")
@@ -91,7 +93,7 @@ func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
 			}
 		}
 	}
-	if v.Caps.MaxZone != 0 {
+	if p.Date == today && v.Caps.MaxZone != 0 {
 		for _, s := range p.Flatten() {
 			if zoneTop(s) > v.Caps.MaxZone {
 				reject("cap zona del verdetto", fmt.Sprintf("Z%d", zoneTop(s)), fmt.Sprintf("max Z%d oggi", v.Caps.MaxZone))
@@ -99,7 +101,7 @@ func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
 			}
 		}
 	}
-	if v.Caps.MaxMinutes != 0 && p.TotalSeconds() > v.Caps.MaxMinutes*60 {
+	if p.Date == today && v.Caps.MaxMinutes != 0 && p.TotalSeconds() > v.Caps.MaxMinutes*60 {
 		reject("cap durata del verdetto",
 			fmt.Sprintf("%d minuti", p.TotalSeconds()/60),
 			fmt.Sprintf("max %d minuti oggi", v.Caps.MaxMinutes))
@@ -121,15 +123,26 @@ func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
 	if total := p.TotalSeconds(); total > maxWorkoutSeconds {
 		reject("durata totale", fmt.Sprintf("%dm", total/60), fmt.Sprintf("max %dm", maxWorkoutSeconds/60))
 	}
-	hardTotal := 0
-	for _, s := range p.Flatten() {
+	// Hard work is measured over CONSECUTIVE Z4+ runs: splitting a 40'
+	// block into 4x10' without recovery is still 40 continuous hard minutes
+	// (step-splitting must not defeat the ceiling).
+	hardTotal, hardRun := 0, 0
+	flat := p.Flatten()
+	for i, s := range flat {
 		if zoneTop(s) >= hardZoneFloor {
 			sec := s.DurationSeconds()
 			hardTotal += sec
-			if sec > maxHardStepSeconds {
-				reject("singolo step duro", fmt.Sprintf("%dm a Z%d", sec/60, zoneTop(s)),
-					fmt.Sprintf("max %dm per step Z%d+", maxHardStepSeconds/60, hardZoneFloor))
+			hardRun += sec
+			lastOrBroken := i == len(flat)-1 || zoneTop(flat[i+1]) < hardZoneFloor
+			if lastOrBroken {
+				if hardRun > maxHardStepSeconds {
+					reject("blocco duro continuo", fmt.Sprintf("%dm a Z%d+", hardRun/60, hardZoneFloor),
+						fmt.Sprintf("max %dm continui Z%d+", maxHardStepSeconds/60, hardZoneFloor))
+				}
+				hardRun = 0
 			}
+		} else {
+			hardRun = 0
 		}
 		if (s.Intensity == "warmup" || s.Intensity == "cooldown") && zoneTop(s) > warmupCooldownMaxZ {
 			reject("zona warmup/cooldown", fmt.Sprintf("Z%d", zoneTop(s)), fmt.Sprintf("max Z%d", warmupCooldownMaxZ))

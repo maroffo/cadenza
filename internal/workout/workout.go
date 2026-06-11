@@ -4,6 +4,7 @@
 package workout
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -94,25 +95,35 @@ type Item struct {
 
 func (it *Item) UnmarshalJSON(raw []byte) error {
 	var probe struct {
-		RepeatCount *int `json:"repeat"`
+		RepeatCount *int            `json:"repeat"`
+		Steps       json.RawMessage `json:"steps"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return err
 	}
-	if probe.RepeatCount != nil {
+	if probe.RepeatCount != nil || probe.Steps != nil {
 		var r Repeat
-		if err := json.Unmarshal(raw, &r); err != nil {
-			return err
+		if err := strictUnmarshal(raw, &r); err != nil {
+			return fmt.Errorf("repeat malformato: %w", err)
 		}
 		it.Repeat = &r
 		return nil
 	}
 	var s Step
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return err
+	if err := strictUnmarshal(raw, &s); err != nil {
+		return fmt.Errorf("step malformato: %w", err)
 	}
 	it.Step = &s
 	return nil
+}
+
+// strictUnmarshal rejects unknown fields: the API does not enforce tool
+// schemas, and a silently-dropped "distance_m" would let the calendar
+// diverge from what the model told the athlete.
+func strictUnmarshal(raw []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 type Plan struct {
@@ -172,6 +183,9 @@ func (p Plan) Validate() error {
 }
 
 func validateStep(s Step, pos, total int) error {
+	if len(s.Label) > 40 {
+		return fmt.Errorf("label oltre 40 caratteri")
+	}
 	if s.Minutes < 0 || s.Minutes > 180 {
 		return fmt.Errorf("minutes %d fuori da [0,180]", s.Minutes)
 	}

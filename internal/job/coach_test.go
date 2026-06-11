@@ -505,9 +505,9 @@ func (s *stubLedger) Record(_ context.Context, r store.WriteRecord) error {
 	return nil
 }
 
-const overboundsPlan = `{"date":"2026-06-11","sport":"Run","title":"folle",
+const overboundsPlan = `{"date":"2026-06-10","sport":"Run","title":"folle",
 	"items":[{"minutes":120,"hr":{"zone":5}}]}`
-const sanePlan = `{"date":"2026-06-11","sport":"Run","title":"easy",
+const sanePlan = `{"date":"2026-06-10","sport":"Run","title":"easy",
 	"items":[{"minutes":40,"hr":{"zone":2}}]}`
 
 func TestConverse_WriteWorkout_GateRejectThenRegenPasses(t *testing.T) {
@@ -606,5 +606,92 @@ func TestConverse_NoWriterHidesTool(t *testing.T) {
 	tools, _ := json.Marshal(llm.Requests[0].Tools)
 	if strings.Contains(string(tools), "write_workout") {
 		t.Fatal("write_workout exposed without a writer wired")
+	}
+}
+
+type failingWriter struct{ err error }
+
+func (f failingWriter) WriteVerified(context.Context, workout.Plan) (icuwrite.Outcome, error) {
+	return icuwrite.Outcome{}, f.err
+}
+
+type failingLedger struct{}
+
+func (failingLedger) Record(context.Context, store.WriteRecord) error {
+	return errors.New("firestore blip")
+}
+
+func TestConverse_WriterErrorDegradesWithoutLeak(t *testing.T) {
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_we", "write_workout", sanePlan),
+		fakes.Text{S: "non sono riuscito a scrivere, te lo riporto qui"},
+	)
+	defer llm.Close()
+	c, out, _, _, _, _ := newCoach(t, llm)
+	c.Writer = failingWriter{err: errors.New("icu 502: corpo upstream con dettagli interni")}
+	led := &stubLedger{}
+	c.Ledger = led
+
+	if err := c.Converse(context.Background(), "scrivi"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	second, _ := json.Marshal(llm.Requests[1].Messages)
+	if !strings.Contains(string(second), "scrittura sul calendario non riuscita") {
+		t.Errorf("generic failure message missing:\n%s", second)
+	}
+	if strings.Contains(string(second), "upstream") {
+		t.Error("upstream error bytes leaked into model context")
+	}
+	if len(led.recs) != 0 {
+		t.Error("ledger record written for a failed write")
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("reply missing")
+	}
+}
+
+func TestConverse_LedgerBlipNeverFailsAVerifiedWrite(t *testing.T) {
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_lb", "write_workout", sanePlan),
+		fakes.Text{S: "scritto e verificato"},
+	)
+	defer llm.Close()
+	c, out, _, _, _, _ := newCoach(t, llm)
+	c.Writer = &stubWriter{outcome: icuwrite.Outcome{Status: icuwrite.Verified, EventID: 4, ExternalID: "x", Attempts: 1}}
+	c.Ledger = failingLedger{}
+
+	if err := c.Converse(context.Background(), "scrivi"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	second, _ := json.Marshal(llm.Requests[1].Messages)
+	if !strings.Contains(string(second), "VERIFICATO") {
+		t.Errorf("ledger blip converted a verified write into failure:\n%s", second)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("reply missing")
+	}
+}
+
+func TestConverse_UnknownPlanFieldsRejected(t *testing.T) {
+	bad := `{"date":"2026-06-10","sport":"Run","title":"x","distance_m":400,
+		"items":[{"minutes":40,"hr":{"zone":2}}]}`
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_uk", "write_workout", bad),
+		fakes.Text{S: "correggo"},
+	)
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	w := &stubWriter{}
+	c.Writer = w
+
+	if err := c.Converse(context.Background(), "scrivi"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if w.calls != 0 {
+		t.Fatal("plan with unknown fields reached the writer (silent divergence)")
+	}
+	second, _ := json.Marshal(llm.Requests[1].Messages)
+	if !strings.Contains(string(second), `"is_error":true`) {
+		t.Error("unknown-field rejection not surfaced")
 	}
 }
