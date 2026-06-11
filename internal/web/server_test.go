@@ -195,3 +195,45 @@ func TestWeb_OverviewDegradesHonestly(t *testing.T) {
 		t.Fatalf("degraded overview = %d", rec.Code)
 	}
 }
+
+func TestCoachHTML_AllowlistOnly(t *testing.T) {
+	in := "<b>VERDETTO: GO</b> e <i>margini</i> & <script>alert(1)</script><a href=x>link</a>"
+	out := string(coachHTML(in))
+	for _, want := range []string{"<b>VERDETTO: GO</b>", "<i>margini</i>", "&amp;",
+		"&lt;script&gt;", "&lt;a href=x&gt;"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "<script>") || strings.Contains(out, "<a ") {
+		t.Fatalf("live tag leaked:\n%s", out)
+	}
+}
+
+func TestWeb_OverviewRendersBoldNotLiteralTags(t *testing.T) {
+	// The live formatting bug: <b> showed as literal text on the dashboard.
+	s, _, _, _, _, sess := testServer()
+	s.Status = stubStatus{} // body contains no tags; the verdict block does
+	rec := authedRequest(t, s, sess, http.MethodGet, "/app", nil)
+	body := rec.Body.String()
+	if strings.Contains(body, "&lt;b&gt;") {
+		t.Fatalf("escaped telegram tags leaked to the page:\n%s", body)
+	}
+	if !strings.Contains(body, "<b>VERDETTO: GO</b>") {
+		t.Errorf("verdict bold not rendered:\n%s", body)
+	}
+}
+
+func TestWeb_ChatUserTextStaysFullyEscaped(t *testing.T) {
+	// Athlete-typed text gets NO tag re-enabling: full escape.
+	s, _, _, _, _, sess := testServer()
+	rec := authedRequest(t, s, sess, http.MethodPost, "/app/chat",
+		url.Values{"text": {"<b>furbo</b><script>x</script>"}})
+	body := rec.Body.String()
+	if !strings.Contains(body, "&lt;b&gt;furbo&lt;/b&gt;") {
+		t.Errorf("user text not fully escaped:\n%s", body)
+	}
+	if strings.Contains(body, "<script>") {
+		t.Fatal("script tag live in user bubble")
+	}
+}
