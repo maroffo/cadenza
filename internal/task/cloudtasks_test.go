@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
 	"google.golang.org/grpc/codes"
@@ -113,5 +114,24 @@ func TestEnqueue_OtherErrorsWrapped(t *testing.T) {
 	e := Envelope{V: 1, Type: TypeTelegramUpdate, ID: "tg-update-2"}
 	if err := c.Enqueue(context.Background(), e); err == nil {
 		t.Fatal("transient queue error swallowed")
+	}
+}
+
+func TestEnqueueAt_SetsScheduleTime(t *testing.T) {
+	var got *cloudtaskspb.CreateTaskRequest
+	c := &CloudTasks{
+		QueuePath: queuePath, TargetURL: targetURL, Audience: audience, InvokerSA: invokerSA,
+		createFn: func(_ context.Context, r *cloudtaskspb.CreateTaskRequest) error {
+			got = r
+			return nil
+		},
+	}
+	at := time.Date(2026, 6, 11, 7, 45, 0, 0, time.UTC)
+	e := Envelope{V: 1, Type: TypeMorningCheck, ID: "morning-2026-06-11-r1"}
+	if err := c.EnqueueAt(context.Background(), e, at); err != nil {
+		t.Fatalf("EnqueueAt: %v", err)
+	}
+	if got.Task.ScheduleTime == nil || !got.Task.ScheduleTime.AsTime().Equal(at) {
+		t.Errorf("ScheduleTime = %v, want %v", got.Task.ScheduleTime, at)
 	}
 }

@@ -5,6 +5,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"regexp"
@@ -89,8 +90,12 @@ func (s *Sender) SendWithButton(ctx context.Context, text, buttonLabel, callback
 	return nil
 }
 
+// isParseError matches HTML entity-parse rejections: errors.Is gates on the
+// library's typed 400 sentinel, the description match narrows to parse
+// failures (other 400s, like a wrong chat id, must NOT trigger a fallback).
 func isParseError(err error) bool {
-	return strings.Contains(err.Error(), "can't parse entities")
+	return errors.Is(err, bot.ErrorBadRequest) &&
+		strings.Contains(err.Error(), "can't parse entities")
 }
 
 var tagRe = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)

@@ -5,12 +5,14 @@ package job
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
 
@@ -58,11 +60,14 @@ func (s *stubMessenger) Send(_ context.Context, body string) error {
 
 type stubRuns struct {
 	completed map[string]string
+	deferred  map[string]int
 	checkErr  error
 	markErr   error
 }
 
-func newStubRuns() *stubRuns { return &stubRuns{completed: map[string]string{}} }
+func newStubRuns() *stubRuns {
+	return &stubRuns{completed: map[string]string{}, deferred: map[string]int{}}
+}
 
 func (s *stubRuns) MorningCompleted(_ context.Context, date string) (bool, error) {
 	if s.checkErr != nil {
@@ -72,11 +77,28 @@ func (s *stubRuns) MorningCompleted(_ context.Context, date string) (bool, error
 	return ok, nil
 }
 
+func (s *stubRuns) MorningAlive(_ context.Context, date string) (bool, error) {
+	if s.checkErr != nil {
+		return false, s.checkErr
+	}
+	_, done := s.completed[date]
+	_, def := s.deferred[date]
+	return done || def, nil
+}
+
 func (s *stubRuns) MarkMorningCompleted(_ context.Context, date, status string) error {
 	if s.markErr != nil {
 		return s.markErr
 	}
 	s.completed[date] = status
+	return nil
+}
+
+func (s *stubRuns) MarkMorningDeferred(_ context.Context, date string, attempt int) error {
+	if s.markErr != nil {
+		return s.markErr
+	}
+	s.deferred[date] = attempt
 	return nil
 }
 
@@ -309,5 +331,173 @@ func TestBaselines_RHRFloorRejected(t *testing.T) {
 	days := wellnessWith(repeatF(60, 20), repeatI(47, 5))
 	if _, err := ComputeBaselines(days); err == nil {
 		t.Fatal("5 resting HR samples accepted; RHR baseline floor must apply")
+	}
+}
+
+type stubDelayed struct {
+	envs []task.Envelope
+	ats  []time.Time
+	err  error
+}
+
+func (s *stubDelayed) EnqueueAt(_ context.Context, e task.Envelope, at time.Time) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.envs = append(s.envs, e)
+	s.ats = append(s.ats, at)
+	return nil
+}
+
+func noHRV(date string) icu.Wellness {
+	d := green(date)
+	d.HRV = nil
+	return d
+}
+
+func TestMorning_MissingHRVDefersWithRetry(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	retry := &stubDelayed{}
+	m := newMorning(stubWellness{days: []icu.Wellness{
+		green("2026-06-09"), noHRV("2026-06-10"),
+	}}, out, runs)
+	m.Retry = retry
+
+	if err := m.RunAttempt(context.Background(), 0); err != nil {
+		t.Fatalf("RunAttempt: %v", err)
+	}
+	if len(out.bodies)+len(out.plain) != 0 {
+		t.Fatal("deferred run must not send")
+	}
+	if runs.deferred["2026-06-10"] != 1 {
+		t.Errorf("deferred mark = %v, want attempt 1", runs.deferred)
+	}
+	if len(retry.envs) != 1 {
+		t.Fatalf("retries scheduled = %d, want 1", len(retry.envs))
+	}
+	env := retry.envs[0]
+	if env.ID != "morning-2026-06-10-r1" || env.Type != task.TypeMorningCheck {
+		t.Errorf("retry envelope = %+v", env)
+	}
+	if want := fixedNow().Add(MorningRetryDelay); !retry.ats[0].Equal(want) {
+		t.Errorf("retry at = %v, want %v", retry.ats[0], want)
+	}
+	if _, done := runs.completed["2026-06-10"]; done {
+		t.Fatal("deferred run must not be marked completed")
+	}
+}
+
+func TestMorning_TerminalAttemptSendsDespiteMissingHRV(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	retry := &stubDelayed{}
+	m := newMorning(stubWellness{days: []icu.Wellness{
+		green("2026-06-09"), noHRV("2026-06-10"),
+	}}, out, runs)
+	m.Retry = retry
+
+	if err := m.RunAttempt(context.Background(), MaxMorningRetries); err != nil {
+		t.Fatalf("RunAttempt: %v", err)
+	}
+	if len(retry.envs) != 0 {
+		t.Fatal("terminal attempt must not schedule another retry")
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1 (late beats silent)", len(out.bodies))
+	}
+	if len(out.verdicts[0].DataGaps) == 0 {
+		t.Error("terminal send without HRV must surface data gaps")
+	}
+	if _, done := runs.completed["2026-06-10"]; !done {
+		t.Fatal("terminal attempt must mark completed")
+	}
+}
+
+func TestMorning_NoRetryConfiguredSendsImmediately(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{noHRV("2026-06-10")}}, out, runs)
+	// m.Retry nil: deferral disabled.
+
+	if err := m.RunAttempt(context.Background(), 0); err != nil {
+		t.Fatalf("RunAttempt: %v", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1", len(out.bodies))
+	}
+}
+
+func TestMorning_PresentHRVNeverDefers(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	retry := &stubDelayed{}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Retry = retry
+
+	if err := m.RunAttempt(context.Background(), 0); err != nil {
+		t.Fatalf("RunAttempt: %v", err)
+	}
+	if len(retry.envs) != 0 {
+		t.Fatal("retry scheduled despite synced HRV")
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1", len(out.bodies))
+	}
+}
+
+func TestMorning_RetryScheduleFailurePropagates(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	retry := &stubDelayed{err: errors.New("queue down")}
+	m := newMorning(stubWellness{days: []icu.Wellness{noHRV("2026-06-10")}}, out, runs)
+	m.Retry = retry
+
+	if err := m.RunAttempt(context.Background(), 0); err == nil {
+		t.Fatal("RunAttempt = nil, want error (caller retry must re-drive the deferral)")
+	}
+	if len(out.bodies) != 0 {
+		t.Fatal("must not send when deferral failed")
+	}
+}
+
+func TestWatchdog_QuietWhileRetryInFlight(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	runs.deferred["2026-06-10"] = 1
+	w := Watchdog{Runs: runs, Out: out, Now: fixedNow, TZ: testTZ}
+
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 0 {
+		t.Fatal("watchdog alerted during an in-flight HRV retry (false alarm)")
+	}
+}
+
+func TestDispatch_MorningAttemptFromPayload(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	retry := &stubDelayed{}
+	m := newMorning(stubWellness{days: []icu.Wellness{noHRV("2026-06-10")}}, out, runs)
+	m.Retry = retry
+	d := Deps{Morning: m}
+
+	// Terminal attempt via payload: must send, not defer.
+	env := task.Envelope{
+		V: 1, Type: task.TypeMorningCheck, ID: "morning-2026-06-10-r2",
+		Payload: json.RawMessage(`{"attempt":2}`),
+	}
+	if err := d.Dispatch(context.Background(), env); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if len(retry.envs) != 0 || len(out.bodies) != 1 {
+		t.Errorf("attempt not honored: retries=%d sends=%d", len(retry.envs), len(out.bodies))
+	}
+
+	// Malformed payload is poison.
+	bad := task.Envelope{V: 1, Type: task.TypeMorningCheck, ID: "x", Payload: json.RawMessage(`{broken`)}
+	if err := d.Dispatch(context.Background(), bad); !errors.Is(err, task.ErrPoison) {
+		t.Fatalf("err = %v, want ErrPoison", err)
 	}
 }

@@ -110,3 +110,31 @@ func TestChats_GetBeforeStartReturnsZeros(t *testing.T) {
 		t.Errorf("got chat=%d user=%d, want zeros (/start never happened)", chatID, userID)
 	}
 }
+
+func TestRuns_DeferredLifecycle(t *testing.T) {
+	client := emulatorClient(t)
+	r := NewRuns(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	date := fmt.Sprintf("2099-defer-%d", time.Now().UnixNano())
+
+	if err := r.MarkMorningDeferred(ctx, date, 1); err != nil {
+		t.Fatalf("MarkMorningDeferred: %v", err)
+	}
+	done, err := r.MorningCompleted(ctx, date)
+	if err != nil || done {
+		t.Fatalf("deferred reports completed=%v err=%v, want false", done, err)
+	}
+	alive, err := r.MorningAlive(ctx, date)
+	if err != nil || !alive {
+		t.Fatalf("deferred reports alive=%v err=%v, want true (watchdog quiet)", alive, err)
+	}
+
+	if err := r.MarkMorningCompleted(ctx, date, "GO"); err != nil {
+		t.Fatalf("MarkMorningCompleted: %v", err)
+	}
+	done, err = r.MorningCompleted(ctx, date)
+	if err != nil || !done {
+		t.Fatalf("completed after deferral reports done=%v err=%v, want true", done, err)
+	}
+}

@@ -5,6 +5,7 @@ package job
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/task"
 	"github.com/maroffo/cadenza/internal/telegram"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
@@ -32,24 +34,49 @@ type Messenger interface {
 	Send(ctx context.Context, body string) error
 }
 
-// RunStore tracks per-date job completion for idempotency.
+// RunStore tracks per-date job state for idempotency and the watchdog.
 type RunStore interface {
+	// MorningCompleted is true only for a terminal run (message sent).
 	MorningCompleted(ctx context.Context, date string) (bool, error)
+	// MorningAlive is true when ANY run state exists, including a deferral:
+	// the watchdog must stay quiet while a retry is in flight.
+	MorningAlive(ctx context.Context, date string) (bool, error)
 	MarkMorningCompleted(ctx context.Context, date, status string) error
+	MarkMorningDeferred(ctx context.Context, date string, attempt int) error
 }
+
+const (
+	// MaxMorningRetries bounds the HRV self-retry chain (decision 21):
+	// attempts 0..MaxMorningRetries-1 may defer; the last always sends.
+	MaxMorningRetries = 2
+	MorningRetryDelay = 45 * time.Minute
+)
 
 type Morning struct {
 	Wellness WellnessSource
 	Profiles ProfileSource
 	Out      Messenger
 	Runs     RunStore
-	Now      func() time.Time
-	TZ       *time.Location
+	// Retry schedules the +45min self-retry when today's HRV has not synced
+	// yet. Nil disables deferral: the message goes out with data gaps.
+	Retry task.DelayedEnqueuer
+	Now   func() time.Time
+	TZ    *time.Location
+}
+
+// morningPayload travels in retry envelopes; the Scheduler's static body has
+// no payload, which decodes as attempt 0.
+type morningPayload struct {
+	Attempt int `json:"attempt"`
 }
 
 const dateLayout = "2006-01-02"
 
 func (m Morning) Run(ctx context.Context) error {
+	return m.RunAttempt(ctx, 0)
+}
+
+func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	today := m.Now().In(m.TZ).Format(dateLayout)
 
 	done, err := m.Runs.MorningCompleted(ctx, today)
@@ -61,14 +88,41 @@ func (m Morning) Run(ctx context.Context) error {
 		return nil
 	}
 
-	body, v, err := m.composeFor(ctx, today)
+	data, in, err := m.prepare(ctx, today)
 	if err != nil {
 		// No degraded message here: the caller's retry policy gets its shot
 		// first; the watchdog covers persistent absence (decision 16).
 		return err
 	}
 
-	if err := m.Out.SendWithVerdict(ctx, body, v); err != nil {
+	// HRV not synced yet: defer once or twice rather than coaching on gaps
+	// at 07:00 sharp. The deferred run doc keeps the watchdog quiet; the
+	// terminal attempt always sends, so the worst case is a late message,
+	// never a silent morning.
+	if in.Today.HRV == nil && attempt < MaxMorningRetries && m.Retry != nil {
+		next := attempt + 1
+		if err := m.Runs.MarkMorningDeferred(ctx, today, next); err != nil {
+			return fmt.Errorf("morning: mark deferred: %w", err)
+		}
+		payload, err := json.Marshal(morningPayload{Attempt: next})
+		if err != nil {
+			return fmt.Errorf("morning: marshal retry payload: %w", err)
+		}
+		env := task.Envelope{
+			V:       task.EnvelopeVersion,
+			Type:    task.TypeMorningCheck,
+			ID:      fmt.Sprintf("morning-%s-r%d", today, next),
+			Payload: payload,
+		}
+		if err := m.Retry.EnqueueAt(ctx, env, m.Now().Add(MorningRetryDelay)); err != nil {
+			return fmt.Errorf("morning: schedule retry: %w", err)
+		}
+		slog.Info("morning: HRV not synced, deferred", "date", today, "attempt", next)
+		return nil
+	}
+
+	v := verdict.Compute(in, verdict.DefaultRules())
+	if err := m.Out.SendWithVerdict(ctx, telegram.MorningBody(data), v); err != nil {
 		return fmt.Errorf("morning: send: %w", err)
 	}
 	if err := m.Runs.MarkMorningCompleted(ctx, today, string(v.Kind)); err != nil {
@@ -82,30 +136,35 @@ func (m Morning) Run(ctx context.Context) error {
 // Compose builds the morning body and verdict without side effects. The
 // morning job sends and marks; /status (M3) sends without marking.
 func (m Morning) Compose(ctx context.Context) (string, verdict.Verdict, error) {
-	return m.composeFor(ctx, m.Now().In(m.TZ).Format(dateLayout))
+	today := m.Now().In(m.TZ).Format(dateLayout)
+	data, in, err := m.prepare(ctx, today)
+	if err != nil {
+		return "", verdict.Verdict{}, err
+	}
+	v := verdict.Compute(in, verdict.DefaultRules())
+	return telegram.MorningBody(data), v, nil
 }
 
-// composeFor takes the date from the caller so Run marks exactly the date
-// the message describes, even across a midnight boundary.
-func (m Morning) composeFor(ctx context.Context, today string) (string, verdict.Verdict, error) {
+// prepare fetches and assembles; the date comes from the caller so Run marks
+// exactly the date the message describes, even across a midnight boundary.
+func (m Morning) prepare(ctx context.Context, today string) (telegram.MorningData, verdict.Input, error) {
 	baselines, rampCap, err := m.Profiles.Profile(ctx)
 	if err != nil {
-		return "", verdict.Verdict{}, fmt.Errorf("morning: profile: %w", err)
+		return telegram.MorningData{}, verdict.Input{}, fmt.Errorf("morning: profile: %w", err)
 	}
 
 	day, err := time.ParseInLocation(dateLayout, today, m.TZ)
 	if err != nil {
-		return "", verdict.Verdict{}, fmt.Errorf("morning: bad date %q: %w", today, err)
+		return telegram.MorningData{}, verdict.Input{}, fmt.Errorf("morning: bad date %q: %w", today, err)
 	}
 	oldest := day.AddDate(0, 0, -7).Format(dateLayout)
 	days, err := m.Wellness.WellnessRange(ctx, oldest, today)
 	if err != nil {
-		return "", verdict.Verdict{}, fmt.Errorf("morning: wellness fetch: %w", err)
+		return telegram.MorningData{}, verdict.Input{}, fmt.Errorf("morning: wellness fetch: %w", err)
 	}
 
 	data, in := assemble(today, days, baselines, rampCap)
-	v := verdict.Compute(in, verdict.DefaultRules())
-	return telegram.MorningBody(data), v, nil
+	return data, in, nil
 }
 
 // assemble maps wellness days onto the message data and the verdict input.

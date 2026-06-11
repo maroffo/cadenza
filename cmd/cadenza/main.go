@@ -47,11 +47,37 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	}
 
-	deps, err := buildJobs(ctx, cfg)
+	// Local dispatch closes over deps, assigned below: dispatch only runs at
+	// request time, after wiring completes.
+	var deps job.Deps
+	local := task.Local{Dispatch: func(ctx context.Context, e task.Envelope) error {
+		return deps.Dispatch(ctx, e)
+	}}
+
+	// Durable path in prod (webhook enqueue + HRV retry); in-process in dev.
+	var enq task.Enqueuer = local
+	var retry task.DelayedEnqueuer = local
+	if cfg.Env == "prod" {
+		tasksClient, err := cloudtasks.NewClient(ctx)
+		if err != nil {
+			return fmt.Errorf("cloudtasks client: %w", err)
+		}
+		defer func() { _ = tasksClient.Close() }()
+		ct := &task.CloudTasks{
+			Client:    tasksClient,
+			QueuePath: cfg.TasksQueuePath,
+			TargetURL: cfg.ExecutorAudience + "/internal/execute",
+			Audience:  cfg.ExecutorAudience,
+			InvokerSA: cfg.InvokerEmail,
+		}
+		enq = ct
+		retry = ct
+	}
+
+	deps, err = buildJobs(ctx, cfg, retry)
 	if err != nil {
 		return err
 	}
-	local := task.Local{Dispatch: deps.Dispatch}
 
 	if runOnce != "" {
 		today := time.Now().In(deps.Morning.TZ).Format("2006-01-02")
@@ -75,23 +101,6 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 			return fmt.Errorf("--poll is dev-only; prod uses the webhook")
 		}
 		return telegram.Poll(ctx, cfg.TelegramBotToken, local)
-	}
-
-	// Webhook enqueuer: durable Cloud Tasks in prod, in-process in dev.
-	var enq task.Enqueuer = local
-	if cfg.Env == "prod" {
-		tasksClient, err := cloudtasks.NewClient(ctx)
-		if err != nil {
-			return fmt.Errorf("cloudtasks client: %w", err)
-		}
-		defer func() { _ = tasksClient.Close() }()
-		enq = &task.CloudTasks{
-			Client:    tasksClient,
-			QueuePath: cfg.TasksQueuePath,
-			TargetURL: cfg.ExecutorAudience + "/internal/execute",
-			Audience:  cfg.ExecutorAudience,
-			InvokerSA: cfg.InvokerEmail,
-		}
 	}
 
 	executor := &server.Executor{
@@ -136,7 +145,7 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 	}
 }
 
-func buildJobs(ctx context.Context, cfg *config.Config) (job.Deps, error) {
+func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueuer) (job.Deps, error) {
 	tz, err := time.LoadLocation(cfg.AthleteTZ)
 	if err != nil {
 		return job.Deps{}, fmt.Errorf("ATHLETE_TZ: %w", err)
@@ -164,6 +173,7 @@ func buildJobs(ctx context.Context, cfg *config.Config) (job.Deps, error) {
 		Profiles: store.NewProfiles(fsClient),
 		Out:      sender,
 		Runs:     runs,
+		Retry:    retry,
 		Now:      time.Now,
 		TZ:       tz,
 	}
