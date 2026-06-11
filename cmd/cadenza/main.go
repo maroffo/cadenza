@@ -221,10 +221,10 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			TZ:         tz,
 		}
 		message.Coach.Injuries = injuries
-		message.Coach.InjurySched = &injuryJob
+		message.Coach.InjurySched = injuryJob
 		message.Muts = store.NewMutations(fsClient)
 	}
-	message.Injuries = injuries
+	message.InjuryFlow = &injuryJob
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
 	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, nil
 }

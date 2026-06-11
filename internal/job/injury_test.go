@@ -64,16 +64,16 @@ func (s *stubInjuries) AppendLog(_ context.Context, id, kind, note string) error
 	return nil
 }
 
-func (s *stubInjuries) Open(_ context.Context, id string, inj store.Injury) error {
+func (s *stubInjuries) Open(_ context.Context, id string, inj store.Injury) (*store.Injury, error) {
 	if s.openErr != nil {
-		return s.openErr
+		return nil, s.openErr
 	}
 	inj.Status = "open"
 	inj.Rev = 1
 	inj.ID = id
 	inj.OpenedAt = fixedNow()
 	s.byID[id] = &inj
-	return nil
+	return &inj, nil
 }
 
 type stubKeyboard struct {
@@ -124,7 +124,10 @@ func TestInjuryWakeup_Day2CheckinWithButtons(t *testing.T) {
 	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "giorno 2") {
 		t.Fatalf("checkin = %v", kb.texts)
 	}
-	want := map[string]bool{"inj:inj-x:better": true, "inj:inj-x:worse": true, "inj:inj-x:resolve": true}
+	want := map[string]bool{
+		"inj:inj-x:1:better": true, "inj:inj-x:1:same": true,
+		"inj:inj-x:1:worse": true, "inj:inj-x:1:resolve": true,
+	}
 	for _, b := range kb.buttons[0] {
 		delete(want, b[1])
 	}
@@ -156,19 +159,74 @@ func TestInjuryWakeup_Day5NotImprovingIsFirm(t *testing.T) {
 func TestInjuryWakeup_Day7NotImprovingStopsFirmly(t *testing.T) {
 	inj := newStubInjuries()
 	openInjury(inj, "inj-x", "same")
-	j, out, kb, retry := newInjuryJob(inj)
+	j, _, kb, retry := newInjuryJob(inj)
 
 	if err := j.Wakeup(context.Background(), wakeupEnv(t, "inj-x", 7, 1)); err != nil {
 		t.Fatalf("Wakeup: %v", err)
 	}
-	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "prenota un fisioterapista") {
-		t.Fatalf("day7 firm stop missing: %v", out.plain)
+	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "prenota un fisioterapista") {
+		t.Fatalf("day7 firm stop missing: %v", kb.texts)
 	}
-	if len(kb.texts) != 0 {
-		t.Error("day7 unimproved is a statement, not a question")
+	// The resolve exit MUST stay in hand: post-day-7 must never become an
+	// unresolvable forever-SKIP.
+	if len(kb.buttons[0]) != 1 || kb.buttons[0][0][1] != "inj:inj-x:1:resolve" {
+		t.Fatalf("day7 must carry exactly the resolve exit: %v", kb.buttons)
 	}
 	if len(retry.envs) != 0 {
 		t.Error("no further wakeups after the firm stop")
+	}
+}
+
+func TestInjuryWakeup_StaleBetterDoesNotShieldDay7(t *testing.T) {
+	// "Migliora" tapped at day 2, silence after: by day 7 that feedback is
+	// stale and the firm stop MUST fire (the liveness hole the review found).
+	inj := newStubInjuries()
+	openInjury(inj, "inj-x", "better")
+	inj.byID["inj-x"].LastFeedbackAt = fixedNow().Add(-5 * 24 * time.Hour)
+	j, _, kb, _ := newInjuryJob(inj)
+
+	if err := j.Wakeup(context.Background(), wakeupEnv(t, "inj-x", 7, 1)); err != nil {
+		t.Fatalf("Wakeup: %v", err)
+	}
+	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "prenota un fisioterapista") {
+		t.Fatalf("stale better shielded the firm stop: %v", kb.texts)
+	}
+}
+
+func TestInjuryWakeup_Day7FreshBetterClosesPositively(t *testing.T) {
+	inj := newStubInjuries()
+	openInjury(inj, "inj-x", "better")
+	inj.byID["inj-x"].LastFeedbackAt = fixedNow().Add(-24 * time.Hour)
+	j, _, kb, retry := newInjuryJob(inj)
+
+	if err := j.Wakeup(context.Background(), wakeupEnv(t, "inj-x", 7, 1)); err != nil {
+		t.Fatalf("Wakeup: %v", err)
+	}
+	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "migliorando") {
+		t.Fatalf("day7 improving close-out missing: %v", kb.texts)
+	}
+	if kb.buttons[0][0][1] != "inj:inj-x:1:resolve" {
+		t.Errorf("resolve exit missing on positive close: %v", kb.buttons)
+	}
+	if len(retry.envs) != 0 {
+		t.Error("ladder must end at day 7")
+	}
+}
+
+func TestInjuryWakeup_Day5FreshBetterStaysGentle(t *testing.T) {
+	inj := newStubInjuries()
+	openInjury(inj, "inj-x", "better")
+	inj.byID["inj-x"].LastFeedbackAt = fixedNow().Add(-12 * time.Hour)
+	j, _, kb, retry := newInjuryJob(inj)
+
+	if err := j.Wakeup(context.Background(), wakeupEnv(t, "inj-x", 5, 1)); err != nil {
+		t.Fatalf("Wakeup: %v", err)
+	}
+	if len(kb.texts) != 1 || strings.Contains(kb.texts[0], "fisioterapista") {
+		t.Fatalf("day5 improving must stay gentle: %v", kb.texts)
+	}
+	if len(retry.envs) != 1 || retry.envs[0].ID != "inj-x-day7-r1" {
+		t.Fatalf("day7 not chained: %+v", retry.envs)
 	}
 }
 
@@ -192,6 +250,9 @@ func TestInjuryWakeup_StaleRevAndResolvedDropSilently(t *testing.T) {
 	}
 	if len(out.plain)+len(kb.texts) != 0 {
 		t.Fatal("stale wakeups produced athlete-visible noise")
+	}
+	if len(j.Retry.(*stubDelayed).envs) != 0 {
+		t.Fatal("stale wakeup chained a successor")
 	}
 }
 
@@ -219,6 +280,35 @@ func TestInjuryReconcile_HealsFutureWakeupsOnly(t *testing.T) {
 	}
 }
 
+func TestInjuryReconcile_OverdueFinalCheckpointCatchesUp(t *testing.T) {
+	// Day-7 task lost and it's day 9: the firm stop must still fire, as an
+	// immediate catch-up under a fresh name (executed names can't be reused).
+	inj := newStubInjuries()
+	inj.byID["inj-late"] = &store.Injury{
+		ID: "inj-late", BodyPart: "tendine", Pain: 5, Status: "open", Rev: 1,
+		OpenedAt: fixedNow().Add(-9 * 24 * time.Hour),
+	}
+	j, _, _, retry := newInjuryJob(inj)
+
+	if err := j.Reconcile(context.Background()); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	found := false
+	for _, e := range retry.envs {
+		if strings.Contains(e.ID, "inj-late-day7-r1-catchup-") {
+			found = true
+			var p injuryPayload
+			_ = json.Unmarshal(e.Payload, &p)
+			if p.Day != 7 {
+				t.Errorf("catchup payload day = %d, want 7", p.Day)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("overdue final checkpoint not caught up: %+v", retry.envs)
+	}
+}
+
 func TestInjuryWakeup_BadPayloadIsPoison(t *testing.T) {
 	inj := newStubInjuries()
 	j, _, _, _ := newInjuryJob(inj)
@@ -229,12 +319,6 @@ func TestInjuryWakeup_BadPayloadIsPoison(t *testing.T) {
 }
 
 func TestMessage_InjuryCallbacks(t *testing.T) {
-	inj := newStubInjuries()
-	openInjury(inj, "inj-x", "")
-	out := &stubInteractor{}
-	m := newMessage(out, newStubDedup(), &stubChats{})
-	m.Injuries = inj
-
 	cases := []struct {
 		action, want string
 	}{
@@ -244,17 +328,63 @@ func TestMessage_InjuryCallbacks(t *testing.T) {
 		{"resolve", "risolto"},
 	}
 	for n, tc := range cases {
-		cb := fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"cb","data":"inj:inj-x:%s","from":{"id":%d}}}`, 60+n, tc.action, allowedID)
-		if err := m.Run(context.Background(), envelopeFor(t, int64(60+n), cb)); err != nil {
-			t.Fatalf("%s: %v", tc.action, err)
-		}
-		reply := out.plain[len(out.plain)-1]
-		if !strings.Contains(strings.ToLower(reply), strings.ToLower(tc.want)) {
-			t.Errorf("%s reply = %q, want mention of %q", tc.action, reply, tc.want)
-		}
+		t.Run(tc.action, func(t *testing.T) {
+			inj := newStubInjuries()
+			openInjury(inj, "inj-x", "")
+			out := &stubInteractor{}
+			m := newMessage(out, newStubDedup(), &stubChats{})
+			flow := InjuryJob{Injuries: inj, Now: fixedNow, TZ: testTZ}
+			m.InjuryFlow = &flow
+
+			cb := fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"cb","data":"inj:inj-x:1:%s","from":{"id":%d}}}`, 60+n, tc.action, allowedID)
+			if err := m.Run(context.Background(), envelopeFor(t, int64(60+n), cb)); err != nil {
+				t.Fatalf("%s: %v", tc.action, err)
+			}
+			reply := out.plain[len(out.plain)-1]
+			if !strings.Contains(strings.ToLower(reply), strings.ToLower(tc.want)) {
+				t.Errorf("%s reply = %q, want mention of %q", tc.action, reply, tc.want)
+			}
+		})
 	}
-	if len(inj.feedback) != 3 || len(inj.resolved) != 1 {
-		t.Errorf("feedback=%v resolved=%v", inj.feedback, inj.resolved)
+}
+
+func TestMessage_InjuryCallbackStaleRevDiesHonestly(t *testing.T) {
+	inj := newStubInjuries()
+	openInjury(inj, "inj-x", "")
+	inj.byID["inj-x"].Rev = 2 // resolved+reopened since the button was sent
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	flow := InjuryJob{Injuries: inj, Now: fixedNow, TZ: testTZ}
+	m.InjuryFlow = &flow
+
+	cb := fmt.Sprintf(`{"update_id":70,"callback_query":{"id":"cb","data":"inj:inj-x:1:resolve","from":{"id":%d}}}`, allowedID)
+	if err := m.Run(context.Background(), envelopeFor(t, 70, cb)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(inj.resolved) != 0 {
+		t.Fatal("stale-rev button resolved a reopened injury")
+	}
+	if !strings.Contains(out.plain[0], "superato") {
+		t.Errorf("honest stale notice missing: %v", out.plain)
+	}
+}
+
+func TestMessage_InjuryGhostCallback(t *testing.T) {
+	inj := newStubInjuries() // empty registry
+	out := &stubInteractor{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	flow := InjuryJob{Injuries: inj, Now: fixedNow, TZ: testTZ}
+	m.InjuryFlow = &flow
+
+	cb := fmt.Sprintf(`{"update_id":71,"callback_query":{"id":"cb","data":"inj:inj-ghost:1:resolve","from":{"id":%d}}}`, allowedID)
+	if err := m.Run(context.Background(), envelopeFor(t, 71, cb)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(inj.resolved) != 0 {
+		t.Fatal("ghost resolved")
+	}
+	if !strings.Contains(out.plain[0], "superato") && !strings.Contains(out.plain[0], "non trovato") {
+		t.Errorf("ghost not answered honestly: %v", out.plain)
 	}
 }
 

@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -454,11 +455,11 @@ func TestInjuries_Lifecycle(t *testing.T) {
 	defer cancel()
 	id := InjuryID(fmt.Sprintf("2099-%d", time.Now().UnixNano()), "Polpaccio Destro!")
 
-	if err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 6}); err != nil {
+	if _, err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 6}); err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	// Idempotent re-report.
-	if err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 7}); err != nil {
+	if _, err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 7}); err != nil {
 		t.Fatalf("Open retry: %v", err)
 	}
 	got, err := inj.Get(ctx, id)
@@ -492,6 +493,30 @@ func TestInjuries_Lifecycle(t *testing.T) {
 	got, _ = inj.Get(ctx, id)
 	if got.Status != "resolved" || got.Rev != 2 {
 		t.Fatalf("after resolve = %+v, want resolved rev2 (stale wakeups must die)", got)
+	}
+	if got.ExpiresAt.IsZero() {
+		t.Error("injury without ExpiresAt: retention TTL has nothing to act on")
+	}
+
+	// Same-day pain-came-back: Open on the resolved doc must REOPEN with a
+	// rev bump, never swallow (false-assurance hole from the review).
+	reopened, err := inj.Open(ctx, id, Injury{BodyPart: "polpaccio destro", Pain: 5})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	if reopened.Status != "open" || reopened.Rev != 3 || reopened.Pain != 5 {
+		t.Fatalf("reopen = %+v, want open rev3 pain5", reopened)
+	}
+
+	// Ghost operations are named, not silently confirmed.
+	if err := inj.Resolve(ctx, "inj-ghost-xyz"); !errors.Is(err, ErrInjuryNotFound) {
+		t.Fatalf("ghost resolve = %v, want ErrInjuryNotFound", err)
+	}
+	if err := inj.RecordFeedback(ctx, "inj-ghost-xyz", "better"); !errors.Is(err, ErrInjuryNotFound) {
+		t.Fatalf("ghost feedback = %v, want ErrInjuryNotFound", err)
+	}
+	if ghost, _ := inj.Get(ctx, "inj-ghost-xyz"); ghost != nil {
+		t.Fatal("ghost feedback created a phantom doc")
 	}
 
 	// Log is sequenced append-only: opened, feedback, resolved (>=3 entries).

@@ -97,16 +97,27 @@ func (s *Sender) SendKeyboard(ctx context.Context, text string, buttons [][2]str
 	for _, b := range buttons {
 		row = append(row, models.InlineKeyboardButton{Text: b[0], CallbackData: b[1]})
 	}
+	markup := models.InlineKeyboardMarkup{
+		InlineKeyboard: [][]models.InlineKeyboardButton{row},
+	}
 	_, err := s.b.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    s.chatID,
-		Text:      text,
-		ParseMode: models.ParseModeHTML,
-		ReplyMarkup: models.InlineKeyboardMarkup{
-			InlineKeyboard: [][]models.InlineKeyboardButton{row},
-		},
+		ChatID:      s.chatID,
+		Text:        text,
+		ParseMode:   models.ParseModeHTML,
+		ReplyMarkup: markup,
 	})
-	if err != nil {
+	if err == nil {
+		return nil
+	}
+	if !isParseError(err) {
 		return fmt.Errorf("telegram send keyboard: %w", err)
+	}
+	// Same doctrine as Send: a mangled tag degrades formatting, never
+	// loses the safety check-in (these carry the resolve exit).
+	if _, err := s.b.SendMessage(ctx, &bot.SendMessageParams{
+		ChatID: s.chatID, Text: stripTags(text), ReplyMarkup: markup,
+	}); err != nil {
+		return fmt.Errorf("telegram keyboard plain fallback: %w", err)
 	}
 	return nil
 }
