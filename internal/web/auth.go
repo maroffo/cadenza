@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -62,23 +63,49 @@ func (a Auth) MintLink() string {
 		a.BaseURL, nonce, exp, a.sign(payload))
 }
 
-// HandleLogin redeems the token: signature, expiry, then single-use nonce.
-// On success it sets the session cookie and lands on the dashboard.
-func (a Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(r.URL.Query().Get("t"), ".")
+// validateToken checks signature and expiry WITHOUT burning the nonce.
+func (a Auth) validateToken(token string) (nonce string, ok bool, msg string) {
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		http.Error(w, "link non valido", http.StatusForbidden)
-		return
+		return "", false, "link non valido"
 	}
 	nonce, expRaw, sig := parts[0], parts[1], parts[2]
 	exp, err := strconv.ParseInt(expRaw, 10, 64)
 	if err != nil || a.Now().Unix() > exp {
-		http.Error(w, "link scaduto: richiedine uno nuovo con /web", http.StatusForbidden)
-		return
+		return "", false, "link scaduto: richiedine uno nuovo con /web"
 	}
 	expected := a.sign(fmt.Sprintf("%s|%d", nonce, exp))
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		http.Error(w, "link non valido", http.StatusForbidden)
+		return "", false, "link non valido"
+	}
+	return nonce, true, ""
+}
+
+// HandleLoginPage answers the GET: it must be SIDE-EFFECT FREE, because
+// chat apps prefetch links for previews (Telegram's crawler burned the
+// nonce before the athlete could click: live bug). It validates and shows
+// a one-tap POST form; only the POST redeems.
+func (a Auth) HandleLoginPage(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("t")
+	if _, ok, msg := a.validateToken(token); !ok {
+		http.Error(w, msg, http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = fmt.Fprintf(w, `<!doctype html><meta charset="utf-8"><title>cadenza</title>
+<body style="font-family:system-ui;max-width:32rem;margin:4rem auto;text-align:center">
+<h2>🚴 cadenza</h2><p>Accesso alla dashboard.</p>
+<form method="post" action="/app/login">
+<input type="hidden" name="t" value="%s">
+<button style="font-size:1.1rem;padding:.7rem 2rem;border-radius:.7rem;cursor:pointer">Entra</button>
+</form></body>`, template.HTMLEscapeString(token))
+}
+
+// HandleLogin (POST) redeems the token: single-use nonce, then session.
+func (a Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
+	nonce, ok, msg := a.validateToken(r.FormValue("t"))
+	if !ok {
+		http.Error(w, msg, http.StatusForbidden)
 		return
 	}
 	fresh, err := a.Sessions.RedeemNonce(r.Context(), nonce, linkTTL)

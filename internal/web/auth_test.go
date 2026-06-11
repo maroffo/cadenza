@@ -57,6 +57,21 @@ func loginPath(t *testing.T, link string) string {
 	return u.Path + "?" + u.RawQuery
 }
 
+func tokenOf(t *testing.T, link string) string {
+	t.Helper()
+	u, _ := url.Parse(link)
+	return u.Query().Get("t")
+}
+
+func postLogin(a Auth, token string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/app/login",
+		strings.NewReader(url.Values{"t": {token}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	a.HandleLogin(rec, req)
+	return rec
+}
+
 func TestAuth_MintRedeemRoundTrip(t *testing.T) {
 	a, sess := testAuth()
 	link := a.MintLink()
@@ -64,8 +79,7 @@ func TestAuth_MintRedeemRoundTrip(t *testing.T) {
 		t.Fatalf("link = %q", link)
 	}
 
-	rec := httptest.NewRecorder()
-	a.HandleLogin(rec, httptest.NewRequest(http.MethodGet, loginPath(t, link), nil))
+	rec := postLogin(a, tokenOf(t, link))
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("redeem code = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -90,15 +104,38 @@ func TestAuth_MintRedeemRoundTrip(t *testing.T) {
 
 func TestAuth_LinkIsSingleUse(t *testing.T) {
 	a, _ := testAuth()
+	token := tokenOf(t, a.MintLink())
+
+	if first := postLogin(a, token); first.Code != http.StatusSeeOther {
+		t.Fatalf("first = %d", first.Code)
+	}
+	second := postLogin(a, token)
+	if second.Code != http.StatusForbidden || !strings.Contains(second.Body.String(), "già usato") {
+		t.Fatalf("replayed link = %d %q", second.Code, second.Body.String())
+	}
+}
+
+func TestAuth_CrawlerPrefetchDoesNotBurnTheLink(t *testing.T) {
+	// THE live bug: Telegram's preview crawler GETs the link before the
+	// athlete taps it. GET must be side-effect free: validate, render the
+	// POST form, burn NOTHING.
+	a, sess := testAuth()
 	link := a.MintLink()
 	path := loginPath(t, link)
 
-	first := httptest.NewRecorder()
-	a.HandleLogin(first, httptest.NewRequest(http.MethodGet, path, nil))
-	second := httptest.NewRecorder()
-	a.HandleLogin(second, httptest.NewRequest(http.MethodGet, path, nil))
-	if second.Code != http.StatusForbidden || !strings.Contains(second.Body.String(), "già usato") {
-		t.Fatalf("replayed link = %d %q", second.Code, second.Body.String())
+	for range 3 { // crawler may fetch repeatedly
+		rec := httptest.NewRecorder()
+		a.HandleLoginPage(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `method="post"`) {
+			t.Fatalf("GET = %d, want the harmless confirm form", rec.Code)
+		}
+	}
+	if len(sess.nonces) != 0 {
+		t.Fatal("GET burned the nonce (crawler kills the link again)")
+	}
+	// The athlete's tap still works after all those prefetches.
+	if rec := postLogin(a, tokenOf(t, link)); rec.Code != http.StatusSeeOther {
+		t.Fatalf("athlete POST after prefetch = %d", rec.Code)
 	}
 }
 
@@ -106,21 +143,21 @@ func TestAuth_ExpiredAndForgedRejected(t *testing.T) {
 	a, _ := testAuth()
 	link := a.MintLink()
 
-	// Expired: shift the clock past the TTL.
+	// Expired: shift the clock past the TTL (both GET page and POST).
 	a.Now = func() time.Time { return time.Date(2026, 6, 12, 10, 11, 0, 0, time.UTC) }
-	rec := httptest.NewRecorder()
-	a.HandleLogin(rec, httptest.NewRequest(http.MethodGet, loginPath(t, link), nil))
-	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "scaduto") {
-		t.Fatalf("expired = %d %q", rec.Code, rec.Body.String())
+	recPage := httptest.NewRecorder()
+	a.HandleLoginPage(recPage, httptest.NewRequest(http.MethodGet, loginPath(t, link), nil))
+	if recPage.Code != http.StatusForbidden {
+		t.Fatalf("expired GET = %d", recPage.Code)
+	}
+	if rec := postLogin(a, tokenOf(t, link)); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "scaduto") {
+		t.Fatalf("expired POST = %d %q", rec.Code, rec.Body.String())
 	}
 
 	// Forged signature.
 	a2, _ := testAuth()
-	forged := strings.Replace(a2.MintLink(), "t=", "t=x", 1)
-	rec2 := httptest.NewRecorder()
-	a2.HandleLogin(rec2, httptest.NewRequest(http.MethodGet, loginPath(t, forged), nil))
-	if rec2.Code != http.StatusForbidden {
-		t.Fatalf("forged = %d", rec2.Code)
+	if rec := postLogin(a2, "x"+tokenOf(t, a2.MintLink())); rec.Code != http.StatusForbidden {
+		t.Fatalf("forged = %d", rec.Code)
 	}
 }
 

@@ -42,6 +42,9 @@ func (s *Sender) Send(ctx context.Context, text string) error {
 			ChatID:    s.chatID,
 			Text:      chunk,
 			ParseMode: models.ParseModeHTML,
+			// No previews, ever: chat-app prefetchers GET every URL we send
+			// (Telegram's crawler burned a magic-link nonce: live bug).
+			LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: ptrBool(true)},
 		})
 		if err == nil {
 			continue
@@ -148,6 +151,8 @@ func isParseError(err error) bool {
 	return errors.Is(err, bot.ErrorBadRequest) &&
 		strings.Contains(err.Error(), "can't parse entities")
 }
+
+func ptrBool(b bool) *bool { return &b }
 
 var tagRe = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
 

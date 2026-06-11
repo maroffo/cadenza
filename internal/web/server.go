@@ -81,7 +81,8 @@ type Server struct {
 
 // Register mounts all dashboard routes on the mux.
 func (s *Server) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /app/login", s.Auth.HandleLogin)
+	mux.HandleFunc("GET /app/login", s.Auth.HandleLoginPage)
+	mux.HandleFunc("POST /app/login", s.Auth.HandleLogin)
 	mux.HandleFunc("GET /app", s.Auth.Require(s.overview))
 	mux.HandleFunc("GET /app/trends", s.Auth.Require(s.trends))
 	mux.HandleFunc("GET /app/trends.json", s.Auth.Require(s.trendsJSON))
