@@ -449,3 +449,59 @@ func TestRenderBlock_CapsGapsAndSkip(t *testing.T) {
 		t.Errorf("data gaps line missing:\n%s", block)
 	}
 }
+
+func TestCompute_ChecksCarryMarginsOnGo(t *testing.T) {
+	// Spec: "thresholds the athlete can self-check". A silent GO is not
+	// self-checkable: every evaluated bound must surface, passed or not.
+	d := greenDay("2026-06-10")
+	d.RestingHR = i(51) // +4 on baseline 47: passes, close to the +5 line
+	v := Compute(Input{
+		Today: d, Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+	}, DefaultRules())
+	if v.Kind != Go {
+		t.Fatalf("Kind = %s, want GO", v.Kind)
+	}
+	if len(v.Checks) < 4 {
+		t.Fatalf("Checks = %d, want at least 4 (hrv, rhr, sleep, ramp)", len(v.Checks))
+	}
+	for _, c := range v.Checks {
+		if !c.Passed {
+			t.Errorf("GO verdict with failed check: %+v", c)
+		}
+		if c.Observed == "" || c.Limit == "" {
+			t.Errorf("check missing observed/limit: %+v", c)
+		}
+	}
+}
+
+func TestCompute_ChecksMarkFailures(t *testing.T) {
+	d := greenDay("2026-06-10")
+	d.SleepSecs = i(5 * 3600)
+	v := Compute(Input{
+		Today: d, Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+	}, DefaultRules())
+	found := false
+	for _, c := range v.Checks {
+		if c.Label == "sonno" && !c.Passed {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("failed sleep check not marked in Checks")
+	}
+}
+
+func TestRenderBlock_GoShowsMargins(t *testing.T) {
+	v := Compute(Input{
+		Today: greenDay("2026-06-10"), Window: []Day{greenDay("2026-06-09")},
+		Baselines: baselines, RampCap: 4.0,
+	}, DefaultRules())
+	block := RenderBlock(v)
+	for _, want := range []string{"GO", "69", "min 64", "max +5", "6.0h", "max 4.0"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("GO block missing %q (self-check thresholds):\n%s", want, block)
+		}
+	}
+}

@@ -96,6 +96,18 @@ type Verdict struct {
 	Caps     Caps
 	DataGaps []string
 	Version  string
+	// Checks lists every evaluated bound, passed or not: the spec requires
+	// thresholds the athlete can self-check, and a silent GO checks nothing.
+	Checks []Check
+}
+
+// Check is one evaluated bound with its margin, shown on GO days and fed to
+// the M4 prompt as deterministic context.
+type Check struct {
+	Label    string
+	Observed string
+	Limit    string
+	Passed   bool
 }
 
 // capsFor maps each rule to the most conservative session it still allows.
@@ -134,6 +146,13 @@ func Compute(in Input, rules Rules) Verdict {
 		v.fire("missing_data",
 			"dato HRV mancante: verdetto conservativo",
 			"nessun valore", fmt.Sprintf("baseline %.0f", in.Baselines.HRVMean))
+	default:
+		v.check("HRV", fmt.Sprintf("%.0f", *in.Today.HRV),
+			fmt.Sprintf("min %.0f", hrvThreshold), *in.Today.HRV >= hrvThreshold)
+	}
+	switch {
+	case in.Today.HRV == nil:
+		// gap already recorded above
 	case *in.Today.HRV < hrvThreshold:
 		lowRun := 1
 		for idx := len(in.Window) - 1; idx >= 0; idx-- {
@@ -162,6 +181,8 @@ func Compute(in Input, rules Rules) Verdict {
 		v.DataGaps = append(v.DataGaps, "FC a riposo non sincronizzata")
 	} else {
 		delta := float64(*in.Today.RestingHR) - in.Baselines.RestingHR
+		v.check("FC riposo", fmt.Sprintf("%+.1f", delta),
+			fmt.Sprintf("max +%.0f", rules.RHRModifyDelta), delta < rules.RHRModifyDelta)
 		switch {
 		case delta >= rules.RHRSkipDelta:
 			v.fire("resting_hr_high",
@@ -179,7 +200,12 @@ func Compute(in Input, rules Rules) Verdict {
 	// Sleep.
 	if in.Today.SleepSecs == nil {
 		v.DataGaps = append(v.DataGaps, "sonno non sincronizzato")
-	} else if *in.Today.SleepSecs < rules.SleepMinSecs {
+	} else {
+		v.check("sonno", fmt.Sprintf("%.1fh", float64(*in.Today.SleepSecs)/3600),
+			fmt.Sprintf("min %.1fh", float64(rules.SleepMinSecs)/3600),
+			*in.Today.SleepSecs >= rules.SleepMinSecs)
+	}
+	if in.Today.SleepSecs != nil && *in.Today.SleepSecs < rules.SleepMinSecs {
 		v.fire("short_sleep",
 			"sonno insufficiente: niente lavoro di qualità",
 			fmt.Sprintf("%.1fh", float64(*in.Today.SleepSecs)/3600),
@@ -194,7 +220,11 @@ func Compute(in Input, rules Rules) Verdict {
 	}
 	if in.Today.RampRate == nil {
 		v.DataGaps = append(v.DataGaps, "ramp rate non disponibile")
-	} else if *in.Today.RampRate > rampCap {
+	} else {
+		v.check("rampa", fmt.Sprintf("%.1f", *in.Today.RampRate),
+			fmt.Sprintf("max %.1f", rampCap), *in.Today.RampRate <= rampCap)
+	}
+	if in.Today.RampRate != nil && *in.Today.RampRate > rampCap {
 		v.fire("ramp_over_cap",
 			"rampa CTL sopra il tetto: ridurre il carico anche se i segnali autonomici sono verdi",
 			fmt.Sprintf("%.1f/settimana", *in.Today.RampRate),
@@ -212,6 +242,11 @@ func Compute(in Input, rules Rules) Verdict {
 	}
 
 	return v
+}
+
+// check records an evaluated bound for athlete self-verification.
+func (v *Verdict) check(label, observed, limit string, passed bool) {
+	v.Checks = append(v.Checks, Check{Label: label, Observed: observed, Limit: limit, Passed: passed})
 }
 
 // fire records a reason, escalates the kind, and tightens caps.

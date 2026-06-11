@@ -30,6 +30,16 @@ func RenderBlock(v Verdict) string {
 		}
 	}
 
+	// On a green day nothing fires, but the spec demands self-checkable
+	// thresholds: show every margin compactly instead of a mute GO.
+	if v.Kind == Go && len(v.Checks) > 0 {
+		parts := make([]string, 0, len(v.Checks))
+		for _, c := range v.Checks {
+			parts = append(parts, fmt.Sprintf("%s %s (%s)", c.Label, c.Observed, c.Limit))
+		}
+		fmt.Fprintf(&b, "\n<i>Margini: %s</i>", strings.Join(parts, " · "))
+	}
+
 	if len(v.DataGaps) > 0 {
 		fmt.Fprintf(&b, "\n<i>Dati mancanti: %s</i>", strings.Join(v.DataGaps, ", "))
 	}
