@@ -31,6 +31,15 @@ type Day struct {
 	RampRate  *float64
 	CTL       *float64
 	ATL       *float64
+	// Conservative-only signals (D32): when present they can DOWNGRADE the
+	// verdict, never upgrade it; when absent they are silent (sparse logging
+	// is normal, nil is no-signal here, unlike the four core metrics).
+	Readiness  *float64 // device composite 0-100
+	SleepScore *float64 // device composite 0-100
+	SpO2       *float64 // percent; low = illness signal
+	Soreness   *int     // athlete-entered, 1 good .. 4 worst
+	Fatigue    *int     // athlete-entered, 1 good .. 4 worst
+	InjuryFeel *int     // athlete-entered, 1 none .. 4 worst
 }
 
 type Baselines struct {
@@ -61,16 +70,32 @@ type Rules struct {
 	RHRSkipDelta   float64 // bpm above baseline -> SKIP
 	SleepMinSecs   int
 	InjurySkipPain int // pain >= this -> SKIP
+
+	// D32 conservative-only thresholds (calibrated on live ranges).
+	ReadinessModify  float64 // below -> MODIFY (observed 60d range: 47-94)
+	ReadinessSkip    float64 // below -> SKIP (autonomic composite floor)
+	SleepScoreModify float64 // below -> MODIFY (observed: 61-93)
+	SpO2Modify       float64 // below -> MODIFY (observed: 95-98)
+	SpO2Skip         float64 // below -> SKIP + see-how-you-feel
+	SubjectiveModify int     // soreness/fatigue >= this -> MODIFY (1..4)
+	InjuryFeelModify int     // athlete injury feel >= this -> MODIFY w/ caps
 }
 
 func DefaultRules() Rules {
 	return Rules{
-		HRVLowSDFactor: 0.75,
-		HRVLowDays:     3,
-		RHRModifyDelta: 5,
-		RHRSkipDelta:   8,
-		SleepMinSecs:   6 * 3600,
-		InjurySkipPain: 4,
+		HRVLowSDFactor:   0.75,
+		HRVLowDays:       3,
+		ReadinessModify:  60,
+		ReadinessSkip:    40,
+		SleepScoreModify: 55,
+		SpO2Modify:       92,
+		SpO2Skip:         90,
+		SubjectiveModify: 3,
+		InjuryFeelModify: 2,
+		RHRModifyDelta:   5,
+		RHRSkipDelta:     8,
+		SleepMinSecs:     6 * 3600,
+		InjurySkipPain:   4,
 	}
 }
 
@@ -123,13 +148,17 @@ var capsFor = map[string]Caps{
 	"short_sleep":         {MaxZone: 2, MaxMinutes: 75},
 	"ramp_over_cap":       {MaxZone: 3, MaxMinutes: 60},
 	"injury_active":       {MaxZone: 1, MaxMinutes: 45},
+	"injury_feel":         {MaxZone: 2, MaxMinutes: 60},
+	"readiness_low":       {MaxZone: 3},
 }
 
 // skipRules escalate the verdict to SKIP; everything else fired is MODIFY.
 var skipRules = map[string]bool{
-	"hrv_low_3d":      true,
-	"resting_hr_high": true,
-	"injury_active":   true,
+	"hrv_low_3d":         true,
+	"resting_hr_high":    true,
+	"injury_active":      true,
+	"readiness_very_low": true,
+	"spo2_very_low":      true,
 }
 
 // Compute is pure: same input, same verdict. All arithmetic happens here,
@@ -225,6 +254,57 @@ func Compute(in Input, rules Rules) Verdict {
 			"rampa CTL sopra il tetto: ridurre il carico anche se i segnali autonomici sono verdi",
 			fmt.Sprintf("%.1f/settimana", *in.Today.RampRate),
 			fmt.Sprintf("%.1f/settimana", rampCap))
+	}
+
+	// D32 conservative-only signals: each can only push the verdict down.
+	if r := in.Today.Readiness; r != nil {
+		v.check("readiness", fmt.Sprintf("%.0f", *r), fmt.Sprintf("min %.0f", rules.ReadinessModify), *r >= rules.ReadinessModify)
+		switch {
+		case *r < rules.ReadinessSkip:
+			v.fire("readiness_very_low",
+				"readiness molto bassa: il composito del device segnala recupero assente, oggi recupero",
+				fmt.Sprintf("%.0f", *r), fmt.Sprintf("%.0f", rules.ReadinessSkip))
+		case *r < rules.ReadinessModify:
+			v.fire("readiness_low",
+				"readiness sotto soglia: recupero autonomico incompleto, tieni il giorno facile",
+				fmt.Sprintf("%.0f", *r), fmt.Sprintf("%.0f", rules.ReadinessModify))
+		}
+	}
+	if sc := in.Today.SleepScore; sc != nil {
+		v.check("sleep score", fmt.Sprintf("%.0f", *sc), fmt.Sprintf("min %.0f", rules.SleepScoreModify), *sc >= rules.SleepScoreModify)
+		if *sc < rules.SleepScoreModify {
+			v.fire("sleep_score_low",
+				"qualità del sonno scarsa: niente intensità oggi",
+				fmt.Sprintf("%.0f", *sc), fmt.Sprintf("%.0f", rules.SleepScoreModify))
+		}
+	}
+	if o2 := in.Today.SpO2; o2 != nil {
+		v.check("spO2", fmt.Sprintf("%.0f%%", *o2), fmt.Sprintf("min %.0f%%", rules.SpO2Modify), *o2 >= rules.SpO2Modify)
+		switch {
+		case *o2 < rules.SpO2Skip:
+			v.fire("spo2_very_low",
+				"saturazione molto bassa per i tuoi standard: possibile malattia, oggi fermo e ascoltati",
+				fmt.Sprintf("%.0f%%", *o2), fmt.Sprintf("%.0f%%", rules.SpO2Skip))
+		case *o2 < rules.SpO2Modify:
+			v.fire("spo2_low",
+				"saturazione sotto il tuo range abituale: solo lavoro facile e osserva come ti senti",
+				fmt.Sprintf("%.0f%%", *o2), fmt.Sprintf("%.0f%%", rules.SpO2Modify))
+		}
+	}
+	if so := in.Today.Soreness; so != nil && *so >= rules.SubjectiveModify {
+		v.fire("soreness_high",
+			"indolenzimento dichiarato alto: il tuo segnale conta più dei numeri, giorno facile",
+			fmt.Sprintf("%d/4", *so), fmt.Sprintf("max %d", rules.SubjectiveModify-1))
+	}
+	if fa := in.Today.Fatigue; fa != nil && *fa >= rules.SubjectiveModify {
+		v.fire("fatigue_high",
+			"fatica dichiarata alta: riduci, oggi non è giornata da spingere",
+			fmt.Sprintf("%d/4", *fa), fmt.Sprintf("max %d", rules.SubjectiveModify-1))
+	}
+	if inj := in.Today.InjuryFeel; inj != nil && *inj >= rules.InjuryFeelModify {
+		v.fire("injury_feel",
+			"hai segnalato fastidio/infortunio nel diario: protezione attiva",
+			fmt.Sprintf("%d/4", *inj), fmt.Sprintf("max %d", rules.InjuryFeelModify-1))
 	}
 
 	// Injuries.
