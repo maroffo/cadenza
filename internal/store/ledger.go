@@ -74,3 +74,22 @@ func (l *Ledger) RecentWrites(ctx context.Context, limit int) ([]WriteRecord, er
 	}
 	return out, nil
 }
+
+// LatestPlanFor returns the most recent stored plan JSON for an external id
+// (the week builder estimates load for already-planned cadenza events).
+func (l *Ledger) LatestPlanFor(ctx context.Context, externalID string) (string, error) {
+	docs, err := l.client.Collection(ledgerCollection).
+		Where("external_id", "==", externalID).
+		OrderBy("created_at", firestore.Desc).Limit(1).Documents(ctx).GetAll()
+	if err != nil {
+		return "", fmt.Errorf("ledger lookup: %w", err)
+	}
+	if len(docs) == 0 {
+		return "", nil
+	}
+	var rec WriteRecord
+	if err := docs[0].DataTo(&rec); err != nil {
+		return "", fmt.Errorf("ledger decode: %w", err)
+	}
+	return rec.PlanJSON, nil
+}

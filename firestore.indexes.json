@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "events_written",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "external_id", "order": "ASCENDING" },
+        { "fieldPath": "created_at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

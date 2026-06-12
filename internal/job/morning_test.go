@@ -732,3 +732,48 @@ func TestMorning_InjuryRegistryDownIsAGap(t *testing.T) {
 		t.Errorf("injury gap not in verdict: %+v", out.verdicts[0].DataGaps)
 	}
 }
+
+type stubEvents struct {
+	events []icu.Event
+	err    error
+}
+
+func (s stubEvents) EventsRange(context.Context, string, string) ([]icu.Event, error) {
+	return s.events, s.err
+}
+
+func strPtr(s string) *string { return &s }
+
+func TestMorning_PlannedTodayLineAppears(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Events = stubEvents{events: []icu.Event{
+		{Category: "WORKOUT", StartDateLocal: "2026-06-10T00:00:00", Name: strPtr("Fondo Z2 50min")},
+		{Category: "RACE_A", StartDateLocal: "2026-06-10T00:00:00", Name: strPtr("non-workout ignorato")},
+	}}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(out.bodies[0], "In programma oggi:</b> Fondo Z2 50min") {
+		t.Errorf("planned line missing:\n%s", out.bodies[0])
+	}
+	if strings.Contains(out.bodies[0], "ignorato") {
+		t.Error("non-workout event leaked into the line")
+	}
+}
+
+func TestMorning_EventsDownSkipsLineQuietly(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Events = stubEvents{err: errors.New("icu 502")}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v (events are enrichment, never a blocker)", err)
+	}
+	if strings.Contains(out.bodies[0], "In programma") {
+		t.Error("line rendered despite events failure")
+	}
+}

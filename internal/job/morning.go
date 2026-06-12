@@ -78,6 +78,8 @@ type Morning struct {
 	Out      Messenger
 	Runs     RunStore
 	Injuries OpenInjuries
+	// Events adds the "in programma oggi" line; nil skips it.
+	Events EventsSource
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
@@ -238,6 +240,17 @@ func (m Morning) prepare(ctx context.Context, today string) (telegram.MorningDat
 	}
 
 	data, in := assemble(today, days, baselines, rampCap)
+	if m.Events != nil {
+		if events, err := m.Events.EventsRange(ctx, today, today); err != nil {
+			slog.Warn("morning: events unavailable", "err", err)
+		} else {
+			for _, e := range events {
+				if e.Category == "WORKOUT" && e.Name != nil {
+					data.PlannedToday = append(data.PlannedToday, *e.Name)
+				}
+			}
+		}
+	}
 	if m.Injuries != nil {
 		open, err := m.Injuries.ListOpen(ctx)
 		if err != nil {

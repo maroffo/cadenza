@@ -32,7 +32,7 @@ func TestVet_CleanPlanPasses(t *testing.T) {
 		step(40, 2),
 		workout.Item{Step: &workout.Step{Minutes: 10, HR: workout.HRTarget{Zone: 1}, Intensity: "cooldown"}},
 	)
-	d := Vet(p, goVerdict(), today)
+	d := Vet(p, goVerdict(), today, nil)
 	if d.Action != Pass || len(d.Violations) != 0 {
 		t.Fatalf("decision = %+v, want clean PASS", d)
 	}
@@ -54,7 +54,7 @@ func TestVet_TierACeilings(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := Vet(tc.p, goVerdict(), today)
+			d := Vet(tc.p, goVerdict(), today, nil)
 			if d.Action != Reject {
 				t.Fatalf("Action = %s, want REJECT (%+v)", d.Action, d.Violations)
 			}
@@ -74,41 +74,41 @@ func TestVet_TierACeilings(t *testing.T) {
 func TestVet_VerdictCoupling(t *testing.T) {
 	// SKIP day: anything above Z1 is BLOCK, not merely reject: the model
 	// cannot out-prescribe the deterministic verdict.
-	d := Vet(plan(today, step(30, 2)), verdict.Verdict{Kind: verdict.Skip}, today)
+	d := Vet(plan(today, step(30, 2)), verdict.Verdict{Kind: verdict.Skip}, today, nil)
 	if d.Action != Block {
 		t.Fatalf("SKIP-day Z2 = %s, want BLOCK", d.Action)
 	}
 
 	v := verdict.Verdict{Kind: verdict.Modify, Caps: verdict.Caps{MaxZone: 2, MaxMinutes: 60}}
-	d = Vet(plan(today, step(30, 3)), v, today)
+	d = Vet(plan(today, step(30, 3)), v, today, nil)
 	if d.Action != Reject {
 		t.Fatalf("zone over verdict cap = %s, want REJECT", d.Action)
 	}
-	d = Vet(plan(today, step(90, 2)), v, today)
+	d = Vet(plan(today, step(90, 2)), v, today, nil)
 	if d.Action != Reject {
 		t.Fatalf("duration over verdict cap = %s, want REJECT", d.Action)
 	}
-	d = Vet(plan(today, step(45, 2)), v, today)
+	d = Vet(plan(today, step(45, 2)), v, today, nil)
 	if d.Action != Pass {
 		t.Fatalf("within caps = %s, want PASS (%+v)", d.Action, d.Violations)
 	}
 }
 
 func TestVet_WriteWindow(t *testing.T) {
-	if d := Vet(plan("2026-06-19", step(30, 2)), goVerdict(), today); d.Action != Block {
+	if d := Vet(plan("2026-06-19", step(30, 2)), goVerdict(), today, nil); d.Action != Block {
 		t.Errorf("past date = %s, want BLOCK", d.Action)
 	}
-	if d := Vet(plan("2026-07-05", step(30, 2)), goVerdict(), today); d.Action != Block {
+	if d := Vet(plan("2026-07-05", step(30, 2)), goVerdict(), today, nil); d.Action != Block {
 		t.Errorf("past window = %s, want BLOCK", d.Action)
 	}
-	if d := Vet(plan("2026-07-04", step(30, 2)), goVerdict(), today); d.Action != Pass {
+	if d := Vet(plan("2026-07-04", step(30, 2)), goVerdict(), today, nil); d.Action != Pass {
 		t.Errorf("window edge = %s, want PASS", d.Action)
 	}
 }
 
 func TestVet_InvalidSchemaRejects(t *testing.T) {
 	p := plan(today) // no items
-	if d := Vet(p, goVerdict(), today); d.Action != Reject {
+	if d := Vet(p, goVerdict(), today, nil); d.Action != Reject {
 		t.Fatalf("invalid plan = %s, want REJECT", d.Action)
 	}
 }
@@ -130,7 +130,7 @@ func TestEstimateTSS_HandComputed(t *testing.T) {
 func TestVet_TSSCeiling(t *testing.T) {
 	// 5h at Z5 would smash TSS, but duration trips first; use 4h Z3:
 	// 4 * 0.83^2 * 100 = 275.6 > 250 while duration 240m < 300m.
-	d := Vet(plan(today, step(120, 3), step(120, 3)), goVerdict(), today)
+	d := Vet(plan(today, step(120, 3), step(120, 3)), goVerdict(), today, nil)
 	if d.Action != Reject {
 		t.Fatalf("Action = %s, want REJECT for TSS", d.Action)
 	}
@@ -148,7 +148,7 @@ func TestVet_TSSCeiling(t *testing.T) {
 func TestVet_StepSplittingCannotDefeatHardCeiling(t *testing.T) {
 	// 4 consecutive 10' Z5 steps = 40 continuous hard minutes: each passes
 	// the per-step check alone, the COALESCED run must not.
-	d := Vet(plan(today, step(10, 5), step(10, 5), step(10, 5), step(10, 5)), goVerdict(), today)
+	d := Vet(plan(today, step(10, 5), step(10, 5), step(10, 5), step(10, 5)), goVerdict(), today, nil)
 	if d.Action != Reject {
 		t.Fatalf("Action = %s, want REJECT (split steps = continuous hard block)", d.Action)
 	}
@@ -170,7 +170,7 @@ func TestVet_RepeatExpansionFeedsTheGate(t *testing.T) {
 		{Minutes: 10, HR: workout.HRTarget{Zone: 4}},
 		{Minutes: 2, HR: workout.HRTarget{Zone: 1}},
 	}}})
-	d := Vet(p, goVerdict(), today)
+	d := Vet(p, goVerdict(), today, nil)
 	if d.Action != Reject {
 		t.Fatalf("Action = %s, want REJECT", d.Action)
 	}
@@ -189,7 +189,7 @@ func TestVet_BlockDominatesReject(t *testing.T) {
 	// SKIP-day BLOCK plus a Tier A violation in the same plan: the verdict
 	// must stay BLOCK (decision 13: never invite a regen on a SKIP day) and
 	// report BOTH problems.
-	d := Vet(plan(today, step(12, 4)), verdict.Verdict{Kind: verdict.Skip}, today)
+	d := Vet(plan(today, step(12, 4)), verdict.Verdict{Kind: verdict.Skip}, today, nil)
 	if d.Action != Block {
 		t.Fatalf("Action = %s, want BLOCK to dominate", d.Action)
 	}
@@ -203,7 +203,7 @@ func TestVet_CooldownZoneBound(t *testing.T) {
 		step(20, 2),
 		workout.Item{Step: &workout.Step{Minutes: 10, HR: workout.HRTarget{Zone: 3}, Intensity: "cooldown"}},
 	)
-	d := Vet(p, goVerdict(), today)
+	d := Vet(p, goVerdict(), today, nil)
 	if d.Action != Reject {
 		t.Fatalf("Z3 cooldown = %s, want REJECT", d.Action)
 	}
@@ -220,7 +220,7 @@ func TestVet_EqualityBoundariesPass(t *testing.T) {
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := Vet(p, goVerdict(), today)
+			d := Vet(p, goVerdict(), today, nil)
 			if d.Action != Pass {
 				t.Fatalf("%s = %s (%+v), want PASS", name, d.Action, d.Violations)
 			}
@@ -233,7 +233,7 @@ func TestVet_MultiViolationAccumulatesAcrossRules(t *testing.T) {
 	// be reported in a single decision (targeted regen needs the full list).
 	// 60'Z4+60'Z4+120'Z3: continuous hard 120m, hard total 120m, TSS 318.
 	p := plan(today, step(60, 4), step(60, 4), step(120, 3))
-	d := Vet(p, goVerdict(), today)
+	d := Vet(p, goVerdict(), today, nil)
 	if d.Action != Reject {
 		t.Fatalf("Action = %s", d.Action)
 	}
@@ -252,13 +252,13 @@ func TestVet_FutureDateExemptFromTodayVerdict(t *testing.T) {
 	// D29: today's SKIP must not block planning an easy week for Tuesday;
 	// Tier A still applies to any date.
 	skip := verdict.Verdict{Kind: verdict.Skip, Caps: verdict.Caps{MaxZone: 1, MaxMinutes: 45}}
-	if d := Vet(plan("2026-06-24", step(40, 2)), skip, today); d.Action != Pass {
+	if d := Vet(plan("2026-06-24", step(40, 2)), skip, today, nil); d.Action != Pass {
 		t.Fatalf("future Z2 on SKIP day = %s (%+v), want PASS (D29)", d.Action, d.Violations)
 	}
-	if d := Vet(plan("2026-06-24", step(120, 5)), skip, today); d.Action != Reject {
+	if d := Vet(plan("2026-06-24", step(120, 5)), skip, today, nil); d.Action != Reject {
 		t.Fatalf("future Tier A violation = %s, want REJECT regardless of date", d.Action)
 	}
-	if d := Vet(plan(today, step(40, 2)), skip, today); d.Action != Block {
+	if d := Vet(plan(today, step(40, 2)), skip, today, nil); d.Action != Block {
 		t.Fatalf("today on SKIP = %s, want BLOCK", d.Action)
 	}
 }
@@ -283,7 +283,7 @@ func FuzzVet_NeverPassesTierAViolation(f *testing.F) {
 			}}},
 			step(clamp(m3, 1, 180), 1),
 		)
-		d := Vet(p, goVerdict(), today)
+		d := Vet(p, goVerdict(), today, nil)
 		if d.Action != Pass {
 			return
 		}
@@ -311,6 +311,129 @@ func FuzzVet_NeverPassesTierAViolation(f *testing.F) {
 		}
 		if EstimateTSS(p) > 250 {
 			t.Fatalf("PASS with TSS %.1f", EstimateTSS(p))
+		}
+	})
+}
+
+func TestVetWeek_CumulativeRules(t *testing.T) {
+	hardDay := func(date string) DayLoad {
+		return DayLoad{Date: date, Cadenza: []PlannedLoad{{Sport: "run", TSS: 80, HardSecs: 20 * 60}}}
+	}
+	executedDay := func(date string, tss float64, hardSecs int) DayLoad {
+		return DayLoad{Date: date, ExecutedTSS: tss, ExecutedHardSecs: hardSecs}
+	}
+	hardPlan := plan("2026-06-25", step(10, 4), step(30, 2)) // 10' hard = hard day
+	easyPlan := plan("2026-06-25", step(40, 2))
+
+	t.Run("nil week skips cumulative, per-workout still applies", func(t *testing.T) {
+		if d := Vet(easyPlan, goVerdict(), today, nil); d.Action != Pass {
+			t.Fatalf("Action = %s", d.Action)
+		}
+	})
+
+	t.Run("consecutive hard days rejected, planned or executed", func(t *testing.T) {
+		for name, week := range map[string]*WeekContext{
+			"planned before":  {Days: []DayLoad{hardDay("2026-06-24")}},
+			"planned after":   {Days: []DayLoad{hardDay("2026-06-26")}},
+			"executed before": {Days: []DayLoad{executedDay("2026-06-24", 70, 15*60)}},
+		} {
+			d := Vet(hardPlan, goVerdict(), today, week)
+			if d.Action != Reject {
+				t.Fatalf("%s: Action = %s, want REJECT", name, d.Action)
+			}
+		}
+		// Easy plan next to a hard day is fine.
+		week := &WeekContext{Days: []DayLoad{hardDay("2026-06-24")}}
+		if d := Vet(easyPlan, goVerdict(), today, week); d.Action != Pass {
+			t.Fatalf("easy next to hard = %s (%+v)", d.Action, d.Violations)
+		}
+	})
+
+	t.Run("fourth hard day in any window rejected", func(t *testing.T) {
+		week := &WeekContext{Days: []DayLoad{
+			hardDay("2026-06-19"), hardDay("2026-06-21"), hardDay("2026-06-23"),
+		}}
+		d := Vet(hardPlan, goVerdict(), today, week)
+		if d.Action != Reject {
+			t.Fatalf("4th hard day passed: %s %+v", d.Action, d.Violations)
+		}
+	})
+
+	t.Run("reverse-order week cannot evade (review CRITICAL)", func(t *testing.T) {
+		// Hard days planned AFTER the plan date: a suffix-only window never
+		// saw them; the straddling windows must.
+		week := &WeekContext{Days: []DayLoad{
+			hardDay("2026-06-27"), hardDay("2026-06-29"), hardDay("2026-06-30"),
+		}}
+		d := Vet(hardPlan, goVerdict(), today, week)
+		if d.Action != Reject {
+			t.Fatalf("future-stacked hard days evaded the gate: %s %+v", d.Action, d.Violations)
+		}
+		// Same for TSS: heavy FUTURE load must count in straddling windows.
+		weekTSS := &WeekContext{Days: []DayLoad{
+			executedDay("2026-06-26", 0, 0),
+			{Date: "2026-06-27", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 300}}},
+			{Date: "2026-06-29", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 290}}},
+		}}
+		d2 := Vet(easyPlan, goVerdict(), today, weekTSS)
+		if d2.Action != Reject {
+			t.Fatalf("future TSS overload evaded: %s %+v", d2.Action, d2.Violations)
+		}
+	})
+
+	t.Run("weekly TSS cumulates planned and executed", func(t *testing.T) {
+		week := &WeekContext{Days: []DayLoad{
+			executedDay("2026-06-20", 200, 0), executedDay("2026-06-22", 200, 0),
+			{Date: "2026-06-24", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 180}}},
+		}}
+		d := Vet(easyPlan, goVerdict(), today, week)
+		if d.Action != Reject {
+			t.Fatalf("weekly TSS overload passed: %s %+v", d.Action, d.Violations)
+		}
+		old := &WeekContext{Days: []DayLoad{executedDay("2026-06-10", 580, 0)}}
+		if d := Vet(easyPlan, goVerdict(), today, old); d.Action != Pass {
+			t.Fatalf("stale load counted: %s", d.Action)
+		}
+	})
+
+	t.Run("same-day rules: external, executed, other-sport cadenza", func(t *testing.T) {
+		ext := &WeekContext{Days: []DayLoad{{Date: "2026-06-25", External: true}}}
+		if d := Vet(easyPlan, goVerdict(), today, ext); d.Action != Reject {
+			t.Fatal("stacking on athlete's own event allowed")
+		}
+		trained := &WeekContext{Days: []DayLoad{executedDay("2026-06-25", 60, 0)}}
+		if d := Vet(easyPlan, goVerdict(), today, trained); d.Action != Reject {
+			t.Fatal("second workout on an already-trained day allowed (review CRITICAL)")
+		}
+		walk := &WeekContext{Days: []DayLoad{executedDay("2026-06-25", 12, 0)}}
+		if d := Vet(easyPlan, goVerdict(), today, walk); d.Action != Pass {
+			t.Fatalf("a morning walk blocked the day: %+v", d.Violations)
+		}
+		otherSport := &WeekContext{Days: []DayLoad{{Date: "2026-06-25",
+			Cadenza: []PlannedLoad{{Sport: "ride", TSS: 50}}}}}
+		if d := Vet(easyPlan, goVerdict(), today, otherSport); d.Action != Reject {
+			t.Fatal("different-sport cadenza stacking allowed")
+		}
+	})
+
+	t.Run("own slot replaced: excluded from sums and same-day rule", func(t *testing.T) {
+		week := &WeekContext{Days: []DayLoad{{Date: "2026-06-25",
+			Cadenza: []PlannedLoad{{Sport: "Run", TSS: 590, HardSecs: 50 * 60}}}}}
+		if d := Vet(easyPlan, goVerdict(), today, week); d.Action != Pass {
+			t.Fatalf("replaced slot double-counted: %s %+v", d.Action, d.Violations)
+		}
+	})
+
+	t.Run("equality boundaries", func(t *testing.T) {
+		// Exactly 8 hard minutes = hard day; 7:59 is not.
+		justHard := plan("2026-06-25", step(8, 4), step(30, 2))
+		adj := &WeekContext{Days: []DayLoad{executedDay("2026-06-24", 70, hardDayMinSecs)}}
+		if d := Vet(justHard, goVerdict(), today, adj); d.Action != Reject {
+			t.Fatal("8-minute hard plan not counted as hard day")
+		}
+		almostAdj := &WeekContext{Days: []DayLoad{executedDay("2026-06-24", 70, hardDayMinSecs-1)}}
+		if d := Vet(justHard, goVerdict(), today, almostAdj); d.Action != Pass {
+			t.Fatalf("7:59 neighbor counted as hard: %+v", d.Violations)
 		}
 	})
 }
