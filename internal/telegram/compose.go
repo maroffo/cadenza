@@ -30,6 +30,8 @@ type MorningData struct {
 	RampRate  *float64
 	Stale     bool
 	StaleAsOf string // date of the data when Stale
+	// PlannedToday lists today's planned workout names (M9.3).
+	PlannedToday []string
 }
 
 func fmtF(v *float64, decimals int) string {
@@ -67,6 +69,9 @@ func MorningBody(d MorningData) string {
 	fmt.Fprintf(&b, "<b>Sonno:</b> %s\n", fmtSleep(d.SleepSecs))
 	fmt.Fprintf(&b, "<b>CTL/ATL:</b> %s / %s\n", fmtF(d.CTL, 1), fmtF(d.ATL, 1))
 	fmt.Fprintf(&b, "<b>Rampa:</b> %s/settimana", fmtF(d.RampRate, 1))
+	for _, name := range d.PlannedToday {
+		fmt.Fprintf(&b, "\n📋 <b>In programma oggi:</b> %s", Escape(name))
+	}
 	return b.String()
 }
 

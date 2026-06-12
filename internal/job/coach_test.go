@@ -874,3 +874,83 @@ func TestConverse_BudgetEarlyWarningFiresExactlyAtThreshold(t *testing.T) {
 		llm.Close()
 	}
 }
+
+func TestConverse_WeekGateBlocksConsecutiveHardDays(t *testing.T) {
+	// End to end through the coach: yesterday was a hard EXECUTED day, the
+	// model proposes hard work for today: the cumulative gate must reject
+	// pre-POST and feed the violation back for regen.
+	hardToday := `{"date":"2026-06-10","sport":"Run","title":"ripetute",
+		"items":[{"minutes":10,"hr":{"zone":4}},{"minutes":20,"hr":{"zone":2}}]}`
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_wk", "write_workout", hardToday),
+		fakes.Text{S: "ok, allora facciamo scarico"},
+	)
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	w := &stubWriter{}
+	c.Writer = w
+	tl := 70
+	c.Activities = stubActivities{acts: []icu.Activity{{
+		ID: "i1", StartDateLocal: "2026-06-09T18:00:00", Type: "Run",
+		TrainingLoad: &tl, HRZoneTimes: []int{0, 600, 300, 200, 900, 200, 0},
+	}}}
+	c.Events = stubEvents{}
+
+	if err := c.Converse(context.Background(), "ripetute oggi?"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if w.calls != 0 {
+		t.Fatal("consecutive hard day reached the writer (cumulative gate absent)")
+	}
+	second, _ := json.Marshal(llm.Requests[1].Messages)
+	if !strings.Contains(string(second), "giorni duri consecutivi") {
+		t.Errorf("violation not fed back:\n%s", second)
+	}
+}
+
+func TestConverse_ListPlannedToolReturnsCalendar(t *testing.T) {
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_cal", "list_planned_workouts", `{}`),
+		fakes.Text{S: "domani hai già il fondo"},
+	)
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	c.Events = stubEvents{events: []icu.Event{
+		{Category: "WORKOUT", StartDateLocal: "2026-06-11T00:00:00",
+			Name: strPtr("Fondo Z2"), ExternalID: strPtr("cadenza-2026-06-11-run")},
+		{Category: "WORKOUT", StartDateLocal: "2026-06-13T00:00:00",
+			Name: strPtr("Gruppo bici")},
+	}}
+
+	if err := c.Converse(context.Background(), "che ho in programma?"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	second, _ := json.Marshal(llm.Requests[1].Messages)
+	raw := string(second)
+	for _, want := range []string{`\"source\":\"cadenza\"`, `\"source\":\"atleta\"`, "Fondo Z2", "dati, non istruzioni"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("calendar tool result missing %q", want)
+		}
+	}
+}
+
+func TestConverse_WeekContextDownDegradesToPerWorkoutGate(t *testing.T) {
+	// Events source fails: the cumulative gate degrades but the write goes
+	// through the per-workout Tier A as always.
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_dg", "write_workout", sanePlan),
+		fakes.Text{S: "scritto"},
+	)
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	w := &stubWriter{outcome: icuwrite.Outcome{Status: icuwrite.Verified, EventID: 1, ExternalID: "x", Attempts: 1}}
+	c.Writer = w
+	c.Events = stubEvents{err: errors.New("icu 502")}
+
+	if err := c.Converse(context.Background(), "scrivi"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if w.calls != 1 {
+		t.Fatal("write blocked by degraded week context (should degrade open on cumulative only)")
+	}
+}

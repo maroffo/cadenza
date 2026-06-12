@@ -61,9 +61,10 @@ func EstimateTSS(p workout.Plan) float64 {
 	return total
 }
 
-// Vet is pure: plan + today's verdict + today's date in, decision out.
-// Block-class problems dominate Reject-class ones in the verdict.
-func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
+// Vet is pure: plan + today's verdict + today's date + week context in,
+// decision out. Block-class problems dominate Reject-class ones. A nil week
+// skips the cumulative rules (per-workout Tier A always applies).
+func Vet(p workout.Plan, v verdict.Verdict, today string, week *WeekContext) Decision {
 	d := Decision{Action: Pass}
 	reject := func(bound, observed, limit string) {
 		d.Violations = append(d.Violations, Violation{bound, observed, limit})
@@ -155,6 +156,8 @@ func Vet(p workout.Plan, v verdict.Verdict, today string) Decision {
 		reject("TSS stimato", fmt.Sprintf("%.0f", tss), fmt.Sprintf("max %d", maxDailyTSS))
 	}
 
+	vetWeek(&d, p, week)
+
 	return d
 }
 
@@ -163,4 +166,125 @@ func zoneTop(s workout.Step) int {
 		return s.HR.Zone
 	}
 	return s.HR.ZoneEnd
+}
+
+// --- Cumulative weekly rules (D34, M9.3) -----------------------------------
+// The per-workout ceilings bound ONE write; nothing stopped three hard days
+// in a row across separate writes (review finding). These rules see the
+// rolling week around the plan date. All Tier A: code, immutable.
+
+const (
+	maxWeeklyTSS    = 600.0 // planned+executed, rolling 7 days ending at plan date
+	maxHardDaysPer7 = 3
+	hardDayMinSecs  = 8 * 60 // a day with >=8 hard minutes counts as a hard day
+)
+
+// DayLoad summarizes one day the gate can see: executed (from icu) or
+// planned (from our ledger / icu events).
+type DayLoad struct {
+	Date     string
+	TSS      float64
+	HardSecs int
+	Planned  bool // a planned event exists this day
+	External bool // planned by the athlete outside cadenza (content unknown)
+}
+
+// WeekContext is the rolling window the coach assembles; nil means the
+// cumulative rules are skipped (per-workout Tier A still applies).
+type WeekContext struct {
+	Days []DayLoad
+}
+
+// vetWeek applies the cumulative rules for a plan landing on date.
+func vetWeek(d *Decision, p workout.Plan, week *WeekContext) {
+	if week == nil {
+		return
+	}
+	reject := func(bound, observed, limit string) {
+		d.Violations = append(d.Violations, Violation{bound, observed, limit})
+		if d.Action != Block {
+			d.Action = Reject
+		}
+	}
+	planHard := HardSeconds(p)
+	planTSS := EstimateTSS(p)
+
+	loads := map[string]DayLoad{}
+	for _, dl := range week.Days {
+		loads[dl.Date] = dl
+	}
+
+	// Same-day external planning: never stack on the athlete's own event.
+	if dl, ok := loads[p.Date]; ok && dl.External {
+		reject("giorno già pianificato",
+			"evento esterno presente su "+p.Date,
+			"un solo workout al giorno: chiedi all'atleta se sostituirlo")
+	}
+
+	// Rolling 7 days ending at the plan date.
+	weekTSS := planTSS
+	hardDays := 0
+	if planHard >= hardDayMinSecs {
+		hardDays = 1
+	}
+	for _, dl := range week.Days {
+		if dl.Date == p.Date {
+			continue // replaced by the new plan (slot-keyed upsert)
+		}
+		if withinWindow(dl.Date, p.Date, 6) {
+			weekTSS += dl.TSS
+			if dl.HardSecs >= hardDayMinSecs {
+				hardDays++
+			}
+		}
+	}
+	if weekTSS > maxWeeklyTSS {
+		reject("TSS settimanale cumulato",
+			fmt.Sprintf("%.0f nei 7 giorni fino a %s", weekTSS, p.Date),
+			fmt.Sprintf("max %.0f (pianificato+eseguito)", maxWeeklyTSS))
+	}
+	if hardDays > maxHardDaysPer7 {
+		reject("giorni duri nella settimana",
+			fmt.Sprintf("%d", hardDays), fmt.Sprintf("max %d su 7 giorni", maxHardDaysPer7))
+	}
+
+	// Consecutive hard days: the reviewers' exact scenario.
+	if planHard >= hardDayMinSecs {
+		for _, adj := range []string{addDays(p.Date, -1), addDays(p.Date, 1)} {
+			if dl, ok := loads[adj]; ok && dl.HardSecs >= hardDayMinSecs {
+				reject("giorni duri consecutivi",
+					"giorno duro adiacente: "+adj,
+					"mai due giorni duri di fila (recupero strutturale master)")
+			}
+		}
+	}
+}
+
+// HardSeconds is the total Z4+ time of a plan (exported for the week builder).
+func HardSeconds(p workout.Plan) int {
+	total := 0
+	for _, s := range p.Flatten() {
+		if zoneTop(s) >= hardZoneFloor {
+			total += s.DurationSeconds()
+		}
+	}
+	return total
+}
+
+func withinWindow(date, end string, days int) bool {
+	d, err1 := time.Parse("2006-01-02", date)
+	e, err2 := time.Parse("2006-01-02", end)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	diff := int(e.Sub(d).Hours() / 24)
+	return diff >= 0 && diff <= days
+}
+
+func addDays(date string, n int) string {
+	d, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return ""
+	}
+	return d.AddDate(0, 0, n).Format("2006-01-02")
 }
