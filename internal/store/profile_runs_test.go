@@ -592,3 +592,35 @@ func TestWebSessions_FullLifecycle(t *testing.T) {
 		t.Fatal("revoked session still valid")
 	}
 }
+
+func TestIdentity_SeedAndLoadRoundTrip(t *testing.T) {
+	client := emulatorClient(t)
+	p := NewProfiles(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	want := Identity{
+		Sports:       []string{"Ride", "Run"},
+		Races:        []Race{{Name: "GF", Date: "2026-09-20", Priority: "A"}},
+		Availability: "60-75 min feriali",
+		Zones: []SportZones{{Sport: "Ride", LTHR: 162, MaxHR: 179,
+			Zones: []int{130, 144, 151, 161, 165, 170, 179}}},
+	}
+	if err := p.SeedIdentity(ctx, want); err != nil {
+		t.Fatalf("SeedIdentity: %v", err)
+	}
+	got, err := p.Identity(ctx)
+	if err != nil {
+		t.Fatalf("Identity: %v", err)
+	}
+	if got.Sports[0] != "Ride" || got.Races[0].Date != "2026-09-20" || got.Zones[0].LTHR != 162 {
+		t.Errorf("roundtrip = %+v", got)
+	}
+
+	// Missing doc degrades to empty, never errors (day-one behavior).
+	_, _ = client.Collection("profile").Doc("identity").Delete(ctx)
+	empty, err := p.Identity(ctx)
+	if err != nil || len(empty.Sports) != 0 {
+		t.Fatalf("missing identity = %+v, %v; want empty, nil", empty, err)
+	}
+}

@@ -21,6 +21,13 @@ import (
 
 type seedFile struct {
 	RampCap float64 `yaml:"ramp_cap"` // CTL ramp/week; clamped to Tier A (6.0) at read time
+	// Identity: the slow-changing half (D23 split, M9). Week-to-week state
+	// (current goal tweaks, niggles) flows through confirmed memory instead.
+	Sports        []string     `yaml:"sports"`
+	Races         []store.Race `yaml:"races"`
+	Availability  string       `yaml:"availability"`
+	InjuryHistory string       `yaml:"injury_history"`
+	Preferences   string       `yaml:"preferences"`
 }
 
 func main() {
@@ -73,6 +80,11 @@ func run(ctx context.Context, yamlPath string, lookbackDays int, dryRun bool) er
 	if err != nil {
 		return err
 	}
+	zones, err := fetchZones(ctx, icuClient, seed.Sports)
+	if err != nil {
+		// Zones enrich the prefix; their absence must not block seeding.
+		slog.Warn("sport zones unavailable, seeding without", "err", err)
+	}
 	slog.Info("computed baselines",
 		"days_fetched", len(days),
 		"hrv_mean", fmt.Sprintf("%.1f", baselines.HRVMean),
@@ -90,9 +102,36 @@ func run(ctx context.Context, yamlPath string, lookbackDays int, dryRun bool) er
 		return fmt.Errorf("firestore: %w", err)
 	}
 	defer func() { _ = fsClient.Close() }()
-	if err := store.NewProfiles(fsClient).Seed(ctx, baselines, seed.RampCap); err != nil {
+	profiles := store.NewProfiles(fsClient)
+	if err := profiles.Seed(ctx, baselines, seed.RampCap); err != nil {
 		return fmt.Errorf("write profile/current: %w", err)
 	}
-	slog.Info("profile/current seeded")
+	if err := profiles.SeedIdentity(ctx, store.Identity{
+		Sports: seed.Sports, Races: seed.Races, Availability: seed.Availability,
+		InjuryHistory: seed.InjuryHistory, Preferences: seed.Preferences, Zones: zones,
+	}); err != nil {
+		return fmt.Errorf("write profile/identity: %w", err)
+	}
+	slog.Info("profile seeded", "sports", seed.Sports, "races", len(seed.Races), "zones", len(zones))
 	return nil
+}
+
+// fetchZones reads the athlete's HR scheme per sport from icu sport settings.
+func fetchZones(ctx context.Context, c *icu.Client, sports []string) ([]store.SportZones, error) {
+	raw, err := c.GetAthlete(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sets, err := icu.ExtractZones(raw, sports)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.SportZones, 0, len(sets))
+	for _, z := range sets {
+		out = append(out, store.SportZones{
+			Sport: z.Sport, LTHR: z.LTHR, MaxHR: z.MaxHR,
+			Zones: z.Zones, ZoneName: z.ZoneName,
+		})
+	}
+	return out, nil
 }

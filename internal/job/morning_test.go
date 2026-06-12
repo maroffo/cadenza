@@ -31,7 +31,11 @@ func (s stubWellness) WellnessRange(context.Context, string, string) ([]icu.Well
 	return s.days, s.err
 }
 
-type stubProfile struct{}
+type stubProfile struct{ identity store.Identity }
+
+func (s stubProfile) Identity(context.Context) (store.Identity, error) {
+	return s.identity, nil
+}
 
 func (stubProfile) Profile(context.Context) (verdict.Baselines, float64, error) {
 	return verdict.Baselines{HRVMean: 68, HRVSD: 6, RestingHR: 47}, 4.0, nil
