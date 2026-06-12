@@ -71,6 +71,8 @@ gcloud firestore fields ttls update expires_at \
   --collection-group=web_sessions --enable-ttl --async || true
 gcloud firestore fields ttls update expires_at \
   --collection-group=checkins --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=debriefs --enable-ttl --async || true
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"
@@ -151,6 +153,7 @@ create_job() {
 create_job cadenza-morning   "0 7 * * *"  '{"v":1,"type":"morning_check","id":"morning-scheduler"}'
 create_job cadenza-watchdog  "15 7 * * *" '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
 create_job cadenza-reconcile "0 12 * * *" '{"v":1,"type":"daily_reconcile","id":"reconcile-scheduler"}'
+create_job cadenza-debrief   "30 19 * * *" '{"v":1,"type":"daily_debrief","id":"debrief-scheduler"}'
 
 # --- Firestore backup (M9.2): daily export to GCS, 90-day lifecycle -------
 BACKUP_BUCKET="gs://cadenza-backups-${PROJECT}"

@@ -21,6 +21,7 @@ const EnvelopeVersion = 1
 const (
 	TypeTelegramUpdate = "telegram_update"
 	TypeMorningCheck   = "morning_check"
+	TypeDailyDebrief   = "daily_debrief"
 	TypeInjuryWakeup   = "injury_wakeup"
 	TypeDailyReconcile = "daily_reconcile"
 	TypeWatchdog       = "watchdog"
