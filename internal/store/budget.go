@@ -24,9 +24,12 @@ func NewBudget(client *firestore.Client) *Budget {
 
 // Spend increments the day's deep-tier counter and reports whether the call
 // is within limit. Returns (false, nil) when the budget is exhausted.
-func (b *Budget) Spend(ctx context.Context, date string, limit int) (bool, error) {
+// Spend consumes one call if under the limit; the post-increment count
+// rides back so callers can warn the athlete near the ceiling.
+func (b *Budget) Spend(ctx context.Context, date string, limit int) (int, bool, error) {
 	ref := b.client.Collection(budgetCollection).Doc(date)
 	allowed := false
+	spent := 0
 	err := b.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		count := int64(0)
 		snap, err := tx.Get(ref)
@@ -43,15 +46,17 @@ func (b *Budget) Spend(ctx context.Context, date string, limit int) (bool, error
 		}
 		if count >= int64(limit) {
 			allowed = false
+			spent = int(count)
 			return nil
 		}
 		allowed = true
+		spent = int(count) + 1
 		return tx.Set(ref, map[string]any{"count": count + 1})
 	})
 	if err != nil {
-		return false, fmt.Errorf("llm budget: %w", err)
+		return 0, false, fmt.Errorf("llm budget: %w", err)
 	}
-	return allowed, nil
+	return spent, allowed, nil
 }
 
 // SpentToday reads the day's deep-tier counter (dashboard transparency).

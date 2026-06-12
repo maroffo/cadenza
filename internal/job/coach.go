@@ -59,8 +59,12 @@ type MutationProposer interface {
 
 // CallBudget enforces the daily deep-tier cap (decision 18, mechanical).
 type CallBudget interface {
-	Spend(ctx context.Context, date string, limit int) (bool, error)
+	Spend(ctx context.Context, date string, limit int) (int, bool, error)
 }
+
+// budgetWarnAt is the early-warning threshold: the athlete hears ONCE, at
+// exactly this count, that the day's deep-tier budget is running low.
+const budgetWarnAt = 30
 
 // maxDeepCallsPerDay bounds worst-case Opus spend regardless of chattiness
 // or redelivery storms.
@@ -157,7 +161,7 @@ func (c *Coach) converse(ctx context.Context, text string) (reply string, v verd
 	// degrade honestly instead of burning Opus on a chatty day or a storm.
 	if c.Budget != nil {
 		today := c.Now().In(c.TZ).Format(dateOnly)
-		ok, err := c.Budget.Spend(ctx, today, maxDeepCallsPerDay)
+		spent, ok, err := c.Budget.Spend(ctx, today, maxDeepCallsPerDay)
 		if err != nil {
 			return "", verdict.Verdict{}, "", fmt.Errorf("coach: budget: %w", err)
 		}
@@ -165,6 +169,14 @@ func (c *Coach) converse(ctx context.Context, text string) (reply string, v verd
 			slog.Warn("coach: daily deep-tier budget exhausted", "date", today)
 			return "", verdict.Verdict{}, "⚠️ Budget giornaliero del coach esaurito: riprendiamo domani. " +
 				"Per il quadro di oggi: /status.", nil
+		}
+		if spent == budgetWarnAt {
+			// Equality, not >=: the notice fires exactly once per day.
+			slog.Warn("coach: budget early warning", "spent", spent, "limit", maxDeepCallsPerDay)
+			if err := c.Out.Send(ctx, fmt.Sprintf(
+				"ℹ️ Avviso budget: %d/%d conversazioni profonde usate oggi.", spent, maxDeepCallsPerDay)); err != nil {
+				slog.Warn("coach: budget notice failed", "err", err)
+			}
 		}
 	}
 

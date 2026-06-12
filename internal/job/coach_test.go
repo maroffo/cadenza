@@ -445,9 +445,14 @@ func TestConverse_DailyBudgetExhaustedDegrades(t *testing.T) {
 	}
 }
 
-type fixedBudget struct{ allowed bool }
+type fixedBudget struct {
+	allowed bool
+	spent   int
+}
 
-func (f fixedBudget) Spend(context.Context, string, int) (bool, error) { return f.allowed, nil }
+func (f fixedBudget) Spend(context.Context, string, int) (int, bool, error) {
+	return f.spent, f.allowed, nil
+}
 
 func TestConverse_RampCapJunkValueRejected(t *testing.T) {
 	llm := fakes.NewAnthropic(
@@ -836,5 +841,36 @@ func TestProfilePrefix_EmptyIdentityDegradesToDayOne(t *testing.T) {
 	}
 	if len(out.bodies) != 1 {
 		t.Fatal("reply missing")
+	}
+}
+
+func TestConverse_BudgetEarlyWarningFiresExactlyAtThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		spent      int
+		wantNotice bool
+	}{
+		{29, false}, {30, true}, {31, false},
+	} {
+		llm := fakes.NewAnthropic(fakes.Text{S: "ok"})
+		c, out, _, _, _, _ := newCoach(t, llm)
+		c.Budget = fixedBudget{allowed: true, spent: tc.spent}
+
+		if err := c.Converse(context.Background(), "ciao"); err != nil {
+			t.Fatalf("spent=%d: %v", tc.spent, err)
+		}
+		notices := 0
+		for _, p := range out.plain {
+			if strings.Contains(p, "Avviso budget") {
+				notices++
+			}
+		}
+		want := 0
+		if tc.wantNotice {
+			want = 1
+		}
+		if notices != want {
+			t.Errorf("spent=%d: notices=%d, want %d (equality-gated, once per day)", tc.spent, notices, want)
+		}
+		llm.Close()
 	}
 }

@@ -409,12 +409,15 @@ func TestBudget_SpendCapsAtLimit(t *testing.T) {
 	date := fmt.Sprintf("2099-budget-%d", time.Now().UnixNano())
 
 	for i := range 3 {
-		ok, err := b.Spend(ctx, date, 3)
+		spent, ok, err := b.Spend(ctx, date, 3)
 		if err != nil || !ok {
 			t.Fatalf("Spend %d = %v, %v; want allowed", i, ok, err)
 		}
+		if spent != i+1 {
+			t.Fatalf("spent = %d after call %d, want post-increment count", spent, i+1)
+		}
 	}
-	ok, err := b.Spend(ctx, date, 3)
+	_, ok, err := b.Spend(ctx, date, 3)
 	if err != nil {
 		t.Fatalf("Spend over: %v", err)
 	}
