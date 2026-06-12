@@ -72,6 +72,11 @@ type OpenInjuries interface {
 	ListOpen(ctx context.Context) ([]store.Injury, error)
 }
 
+// CheckinSource reads the day's subjective taps; satisfied by store.Checkins.
+type CheckinSource interface {
+	Get(ctx context.Context, date string) (store.Checkin, error)
+}
+
 type Morning struct {
 	Wellness WellnessSource
 	Profiles ProfileSource
@@ -80,6 +85,9 @@ type Morning struct {
 	Injuries OpenInjuries
 	// Events adds the "in programma oggi" line; nil skips it.
 	Events EventsSource
+	// Checkins + Keyboard power the 2-tap subjective check-in (M9.4).
+	Checkins CheckinSource
+	Keyboard KeyboardSender
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
@@ -166,7 +174,33 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 		// bounded by the caller's max-attempts (accepted trade-off).
 		return fmt.Errorf("morning: mark completed: %w", err)
 	}
+	// 2-tap check-in (M9.4): best-effort, after the completion mark so a
+	// keyboard failure can never resend the morning message on retry.
+	if m.Keyboard != nil {
+		if err := m.Keyboard.SendKeyboard(ctx, "🙋 Come ti senti stamattina?", checkinFeelButtons(today)); err != nil {
+			slog.Warn("morning: checkin keyboard failed", "err", err)
+		}
+	}
 	return nil
+}
+
+func checkinFeelButtons(date string) [][2]string {
+	prefix := "ci:" + date + ":feel:"
+	return [][2]string{
+		{"💪 Bene", prefix + "bene"},
+		{"😐 Così così", prefix + "cosi"},
+		{"🥱 Stanco", prefix + "stanco"},
+		{"🤕 Dolorante", prefix + "dolorante"},
+	}
+}
+
+func checkinTimeButtons(date string) [][2]string {
+	prefix := "ci:" + date + ":time:"
+	return [][2]string{
+		{"⏱ 60-75'", prefix + "full"},
+		{"⏳ 30-45'", prefix + "short"},
+		{"🚫 Niente oggi", prefix + "none"},
+	}
 }
 
 // narrate wraps the deterministic body with the coach prose. Narrative
@@ -251,6 +285,14 @@ func (m Morning) prepare(ctx context.Context, today string) (telegram.MorningDat
 			}
 		}
 	}
+	if m.Checkins != nil {
+		ci, err := m.Checkins.Get(ctx, today)
+		if err != nil {
+			slog.Warn("morning: checkin unavailable", "err", err)
+		} else {
+			applyCheckin(&data, &in, ci)
+		}
+	}
 	if m.Injuries != nil {
 		open, err := m.Injuries.ListOpen(ctx)
 		if err != nil {
@@ -319,6 +361,24 @@ func assemble(today string, days []icu.Wellness, baselines verdict.Baselines, ra
 		data.RampRate = display.RampRate
 	}
 	return data, in
+}
+
+// applyCheckin folds the athlete's taps into the day: gap-fill ONLY (device
+// data wins when present) and conservative-only via the D32 rules.
+func applyCheckin(data *telegram.MorningData, in *verdict.Input, ci store.Checkin) {
+	data.CheckinFeeling = ci.Feeling
+	data.CheckinTime = ci.TimeBudget
+	three := 3
+	switch ci.Feeling {
+	case "stanco":
+		if in.Today.Fatigue == nil {
+			in.Today.Fatigue = &three
+		}
+	case "dolorante":
+		if in.Today.Soreness == nil {
+			in.Today.Soreness = &three
+		}
+	}
 }
 
 func toVerdictDay(w icu.Wellness) verdict.Day {

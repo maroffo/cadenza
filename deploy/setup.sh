@@ -69,6 +69,8 @@ gcloud firestore fields ttls update expires_at \
   --collection-group=web_nonces --enable-ttl --async || true
 gcloud firestore fields ttls update expires_at \
   --collection-group=web_sessions --enable-ttl --async || true
+gcloud firestore fields ttls update expires_at \
+  --collection-group=checkins --enable-ttl --async || true
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"

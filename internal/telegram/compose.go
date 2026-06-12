@@ -32,6 +32,35 @@ type MorningData struct {
 	StaleAsOf string // date of the data when Stale
 	// PlannedToday lists today's planned workout names (M9.3).
 	PlannedToday []string
+	// Checkin taps (M9.4); empty = not answered yet.
+	CheckinFeeling string
+	CheckinTime    string
+}
+
+func checkinFeelLabel(v string) string {
+	switch v {
+	case "bene":
+		return "si sente bene"
+	case "cosi":
+		return "così così"
+	case "stanco":
+		return "stanco"
+	case "dolorante":
+		return "dolorante"
+	}
+	return v
+}
+
+func checkinTimeLabel(v string) string {
+	switch v {
+	case "full":
+		return "tempo pieno (60-75')"
+	case "short":
+		return "tempo ridotto (30-45')"
+	case "none":
+		return "oggi niente allenamento possibile"
+	}
+	return v
 }
 
 func fmtF(v *float64, decimals int) string {
@@ -71,6 +100,17 @@ func MorningBody(d MorningData) string {
 	fmt.Fprintf(&b, "<b>Rampa:</b> %s/settimana", fmtF(d.RampRate, 1))
 	for _, name := range d.PlannedToday {
 		fmt.Fprintf(&b, "\n📋 <b>In programma oggi:</b> %s", Escape(name))
+	}
+	if d.CheckinFeeling != "" || d.CheckinTime != "" {
+		b.WriteString("\n🙋 <b>Check-in:</b> ")
+		parts := []string{}
+		if d.CheckinFeeling != "" {
+			parts = append(parts, checkinFeelLabel(d.CheckinFeeling))
+		}
+		if d.CheckinTime != "" {
+			parts = append(parts, checkinTimeLabel(d.CheckinTime))
+		}
+		b.WriteString(strings.Join(parts, " · "))
 	}
 	return b.String()
 }
