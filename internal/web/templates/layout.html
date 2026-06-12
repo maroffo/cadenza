@@ -1,7 +1,7 @@
 {{define "head"}}<!doctype html><html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>cadenza</title>
-<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+<script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous" defer></script>
 <style>
 body{font-family:system-ui;margin:0;background:#0f1419;color:#e6e1cf}
 nav{display:flex;gap:.4rem;flex-wrap:wrap;padding:.7rem 1rem;background:#14191f;position:sticky;top:0}
@@ -26,5 +26,6 @@ small{color:#8a8f98}
 <a href="/app/injuries" {{if eq .Page "injuries"}}class="active"{{end}}>🩹 Infortuni</a>
 <a href="/app/audit" {{if eq .Page "audit"}}class="active"{{end}}>🔍 Audit</a>
 <a href="/app/chat" {{if eq .Page "chat"}}class="active"{{end}}>💬 Coach</a>
+<form method="post" action="/app/logout" style="margin-left:auto"><button title="Esci">🚪</button></form>
 </nav><main>{{end}}
 {{define "foot"}}</main></body></html>{{end}}

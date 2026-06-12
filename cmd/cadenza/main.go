@@ -77,7 +77,7 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 		retry = ct
 	}
 
-	deps, err = buildJobs(ctx, cfg, retry)
+	deps, webServer, err := buildJobs(ctx, cfg, retry)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 
 	rootMux := server.New(server.Deps{Executor: executor, Webhook: webhook})
 	if webServer != nil {
-		webServer.Register(rootMux.(*http.ServeMux))
+		webServer.Register(rootMux)
 	}
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -152,9 +152,6 @@ func run(ctx context.Context, runOnce string, poll bool) error {
 	}
 }
 
-// webServer is set by buildJobs when the dashboard is enabled; run() mounts it.
-var webServer *web.Server
-
 // webHistory adapts the chat page to the chats+sessions stores.
 type webHistory struct {
 	chats    *store.Chats
@@ -181,16 +178,19 @@ func (a webAudit) RecentMutations(ctx context.Context, limit int) ([]store.Mutat
 func (a webAudit) SpentToday(ctx context.Context, date string) (int, error) {
 	return a.budget.SpentToday(ctx, date)
 }
+func (a webAudit) RecordWebChange(ctx context.Context, kind, oldValue, newValue string) error {
+	return a.muts.RecordWebChange(ctx, kind, oldValue, newValue)
+}
 
-func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueuer) (job.Deps, error) {
+func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueuer) (job.Deps, *web.Server, error) {
 	tz, err := time.LoadLocation(cfg.AthleteTZ)
 	if err != nil {
-		return job.Deps{}, fmt.Errorf("ATHLETE_TZ: %w", err)
+		return job.Deps{}, nil, fmt.Errorf("ATHLETE_TZ: %w", err)
 	}
 
 	fsClient, err := store.NewClient(ctx, cfg.GCPProject)
 	if err != nil {
-		return job.Deps{}, fmt.Errorf("firestore: %w", err)
+		return job.Deps{}, nil, fmt.Errorf("firestore: %w", err)
 	}
 
 	// Burst floor of 1: a configured rate in (0,1) would otherwise truncate
@@ -200,7 +200,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 
 	tgBot, err := bot.New(cfg.TelegramBotToken, bot.WithSkipGetMe())
 	if err != nil {
-		return job.Deps{}, fmt.Errorf("telegram bot: %w", err)
+		return job.Deps{}, nil, fmt.Errorf("telegram bot: %w", err)
 	}
 	sender := telegram.NewSender(tgBot, cfg.TelegramChatID)
 
@@ -261,7 +261,12 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 	}
 	message.InjuryFlow = &injuryJob
 	// M8 dashboard: enabled when the web secret exists.
+	var webServer *web.Server
 	if cfg.WebSessionSecret != "" && cfg.ExecutorAudience != "" {
+		// The HMAC key IS the auth boundary: refuse weak ones outright.
+		if len(cfg.WebSessionSecret) < 32 {
+			return job.Deps{}, nil, fmt.Errorf("WEB_SESSION_SECRET troppo corto (%d): minimo 32 byte (openssl rand -hex 32)", len(cfg.WebSessionSecret))
+		}
 		webAuth := web.Auth{
 			Secret:   []byte(cfg.WebSessionSecret),
 			Sessions: store.NewWebSessions(fsClient),
@@ -275,7 +280,6 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Auth:     webAuth,
 			ICU:      icuClient,
 			Status:   morning,
-			Chat:     message.Coach,
 			History:  webHistory{chats: webChats, sessions: webSessions},
 			Injuries: injuries,
 			Rules:    store.NewRules(fsClient),
@@ -288,7 +292,13 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Now: time.Now,
 			TZ:  tz,
 		}
+		// Typed-nil trap: a nil *job.Coach in a non-nil interface panics on
+		// first use. Skeleton mode (no LLM) keeps Chat nil and the handler
+		// answers honestly.
+		if message.Coach != nil {
+			webServer.Chat = message.Coach
+		}
 	}
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
-	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, nil
+	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, webServer, nil
 }

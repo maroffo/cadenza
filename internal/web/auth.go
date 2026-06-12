@@ -29,9 +29,10 @@ const (
 type SessionStore interface {
 	// RedeemNonce marks a login nonce used; false when already used/unknown.
 	RedeemNonce(ctx context.Context, nonce string, ttl time.Duration) (bool, error)
-	// SaveSession / CheckSession manage the long-lived cookie session.
+	// SaveSession / CheckSession / DeleteSession manage the cookie session.
 	SaveSession(ctx context.Context, id string, ttl time.Duration) error
 	CheckSession(ctx context.Context, id string) (bool, error)
+	DeleteSession(ctx context.Context, id string) error
 }
 
 type Auth struct {
@@ -47,9 +48,11 @@ func randomToken() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func (a Auth) sign(payload string) string {
+// sign is domain-separated by purpose: a captured link token must never
+// double as a cookie signature (and vice versa).
+func (a Auth) sign(purpose, payload string) string {
 	mac := hmac.New(sha256.New, a.Secret)
-	mac.Write([]byte(payload))
+	mac.Write([]byte(purpose + "|" + payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -60,7 +63,7 @@ func (a Auth) MintLink() string {
 	exp := a.Now().Add(linkTTL).Unix()
 	payload := fmt.Sprintf("%s|%d", nonce, exp)
 	return fmt.Sprintf("%s/app/login?t=%s.%d.%s",
-		a.BaseURL, nonce, exp, a.sign(payload))
+		a.BaseURL, nonce, exp, a.sign("link", payload))
 }
 
 // validateToken checks signature and expiry WITHOUT burning the nonce.
@@ -74,7 +77,7 @@ func (a Auth) validateToken(token string) (nonce string, ok bool, msg string) {
 	if err != nil || a.Now().Unix() > exp {
 		return "", false, "link scaduto: richiedine uno nuovo con /web"
 	}
-	expected := a.sign(fmt.Sprintf("%s|%d", nonce, exp))
+	expected := a.sign("link", fmt.Sprintf("%s|%d", nonce, exp))
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return "", false, "link non valido"
 	}
@@ -123,8 +126,27 @@ func (a Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: sessionID + "." + a.sign(sessionID),
+		Name: cookieName, Value: sessionID + "." + a.sign("cookie", sessionID),
 		Path: cookiePath, Expires: a.Now().Add(sessionTTL),
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, "/app", http.StatusSeeOther)
+}
+
+// HandleLogout revokes the session server-side and clears the cookie: a
+// stolen cookie must be killable without touching Firestore by hand.
+func (a Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
+	if c, err := r.Cookie(cookieName); err == nil {
+		parts := strings.SplitN(c.Value, ".", 2)
+		if len(parts) == 2 && hmac.Equal([]byte(parts[1]), []byte(a.sign("cookie", parts[0]))) {
+			if err := a.Sessions.DeleteSession(r.Context(), parts[0]); err != nil {
+				http.Error(w, "errore interno", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: "", Path: cookiePath, MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
@@ -133,10 +155,18 @@ func (a Auth) HandleLogin(w http.ResponseWriter, r *http.Request) {
 // Require wraps handlers with the cookie check (signature + store lookup).
 func (a Auth) Require(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Health data: never let browsers or intermediaries cache it.
+		w.Header().Set("Cache-Control", "no-store")
+		// CSRF belt on top of SameSite=Lax: cross-site requests announce
+		// themselves via Sec-Fetch-Site in every modern browser.
+		if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+			http.Error(w, "richiesta cross-site rifiutata", http.StatusForbidden)
+			return
+		}
 		c, err := r.Cookie(cookieName)
 		if err == nil {
 			parts := strings.SplitN(c.Value, ".", 2)
-			if len(parts) == 2 && hmac.Equal([]byte(parts[1]), []byte(a.sign(parts[0]))) {
+			if len(parts) == 2 && hmac.Equal([]byte(parts[1]), []byte(a.sign("cookie", parts[0]))) {
 				ok, err := a.Sessions.CheckSession(r.Context(), parts[0])
 				if err == nil && ok {
 					next(w, r)

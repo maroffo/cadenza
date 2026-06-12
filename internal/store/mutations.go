@@ -303,3 +303,19 @@ func (r *Rules) Deactivate(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// RecordWebChange writes an already-applied profile event originating from
+// the dashboard: the athlete acted directly, so there is nothing to confirm,
+// but the no-change-without-event invariant (decision 14) still holds.
+func (m *Mutations) RecordWebChange(ctx context.Context, kind, oldValue, newValue string) error {
+	id := fmt.Sprintf("web-%s-%d", kind, time.Now().UnixNano())
+	_, err := m.client.Collection(mutationsCollection).Doc(id).Create(ctx, Mutation{
+		Kind: kind, NewValue: newValue, Rationale: "modifica diretta da dashboard (vecchio valore: " + oldValue + ")",
+		SourceQuote: "azione web", Status: "applied",
+		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(mutationRetention),
+	})
+	if err != nil {
+		return fmt.Errorf("web change record: %w", err)
+	}
+	return nil
+}
