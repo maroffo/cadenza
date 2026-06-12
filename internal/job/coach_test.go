@@ -141,6 +141,7 @@ func TestConverse_HappyPathPrefixAndPersistence(t *testing.T) {
 	for _, want := range []string{
 		"PROFILO ATLETA", "Baseline HRV: 68.0", "Niente qualità dopo un volo",
 		"Contesto deterministico di oggi", "VERDETTO", "come sto messo?",
+		"list_planned_workouts", "mai rispondere a memoria",
 	} {
 		if !strings.Contains(raw, want) {
 			t.Errorf("request missing %q", want)
