@@ -150,6 +150,32 @@ create_job cadenza-morning   "0 7 * * *"  '{"v":1,"type":"morning_check","id":"m
 create_job cadenza-watchdog  "15 7 * * *" '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
 create_job cadenza-reconcile "0 12 * * *" '{"v":1,"type":"daily_reconcile","id":"reconcile-scheduler"}'
 
+# --- Firestore backup (M9.2): daily export to GCS, 90-day lifecycle -------
+BACKUP_BUCKET="gs://cadenza-backups-${PROJECT}"
+if ! gsutil ls -b "$BACKUP_BUCKET" >/dev/null 2>&1; then
+  gsutil mb -l "$REGION" -b on "$BACKUP_BUCKET"
+fi
+cat > /tmp/cadenza-backup-lifecycle.json <<'LIFECYCLE'
+{"rule":[{"action":{"type":"Delete"},"condition":{"age":90}}]}
+LIFECYCLE
+gsutil lifecycle set /tmp/cadenza-backup-lifecycle.json "$BACKUP_BUCKET"
+# Firestore service agent writes the export; invoker SA calls the API.
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT" --format="value(projectNumber)")
+FS_SA="service-${PROJECT_NUMBER}@gcp-sa-firestore.iam.gserviceaccount.com"
+gsutil iam ch "serviceAccount:${FS_SA}:roles/storage.objectAdmin" "$BACKUP_BUCKET" || true
+gcloud projects add-iam-policy-binding "$PROJECT" \
+  --member="serviceAccount:cadenza-invoker@${PROJECT}.iam.gserviceaccount.com" \
+  --role=roles/datastore.importExportAdmin --condition=None >/dev/null
+if ! gcloud scheduler jobs describe cadenza-backup --location="$REGION" >/dev/null 2>&1; then
+  gcloud scheduler jobs create http cadenza-backup \
+    --location="$REGION" --schedule="0 3 * * *" --time-zone="Europe/Rome" \
+    --uri="https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/(default):exportDocuments" \
+    --http-method=POST \
+    --message-body="{\"outputUriPrefix\":\"${BACKUP_BUCKET}\"}" \
+    --oauth-service-account-email="cadenza-invoker@${PROJECT}.iam.gserviceaccount.com" \
+    --attempt-deadline=540s
+fi
+
 # ---- Dead-man's switch: email on Scheduler failures + watchdog ERROR ------------
 say "Monitoring: notification channel + alert policies"
 CHANNEL=$(gcloud beta monitoring channels list --filter="displayName='cadenza-email'" --format='value(name)' | head -1)
