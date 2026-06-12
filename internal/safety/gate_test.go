@@ -317,10 +317,10 @@ func FuzzVet_NeverPassesTierAViolation(f *testing.F) {
 
 func TestVetWeek_CumulativeRules(t *testing.T) {
 	hardDay := func(date string) DayLoad {
-		return DayLoad{Date: date, TSS: 80, HardSecs: 20 * 60, Planned: true}
+		return DayLoad{Date: date, Cadenza: []PlannedLoad{{Sport: "run", TSS: 80, HardSecs: 20 * 60}}}
 	}
-	easyDay := func(date string, tss float64) DayLoad {
-		return DayLoad{Date: date, TSS: tss}
+	executedDay := func(date string, tss float64, hardSecs int) DayLoad {
+		return DayLoad{Date: date, ExecutedTSS: tss, ExecutedHardSecs: hardSecs}
 	}
 	hardPlan := plan("2026-06-25", step(10, 4), step(30, 2)) // 10' hard = hard day
 	easyPlan := plan("2026-06-25", step(40, 2))
@@ -331,86 +331,109 @@ func TestVetWeek_CumulativeRules(t *testing.T) {
 		}
 	})
 
-	t.Run("consecutive hard days rejected (the review scenario)", func(t *testing.T) {
-		week := &WeekContext{Days: []DayLoad{hardDay("2026-06-24")}}
-		d := Vet(hardPlan, goVerdict(), today, week)
-		if d.Action != Reject {
-			t.Fatalf("Action = %s, want REJECT", d.Action)
-		}
-		found := false
-		for _, v := range d.Violations {
-			if strings.Contains(v.Bound, "consecutivi") {
-				found = true
+	t.Run("consecutive hard days rejected, planned or executed", func(t *testing.T) {
+		for name, week := range map[string]*WeekContext{
+			"planned before":  {Days: []DayLoad{hardDay("2026-06-24")}},
+			"planned after":   {Days: []DayLoad{hardDay("2026-06-26")}},
+			"executed before": {Days: []DayLoad{executedDay("2026-06-24", 70, 15*60)}},
+		} {
+			d := Vet(hardPlan, goVerdict(), today, week)
+			if d.Action != Reject {
+				t.Fatalf("%s: Action = %s, want REJECT", name, d.Action)
 			}
 		}
-		if !found {
-			t.Fatalf("violations = %+v", d.Violations)
-		}
-		// Next-day adjacency too.
-		week2 := &WeekContext{Days: []DayLoad{hardDay("2026-06-26")}}
-		if d := Vet(hardPlan, goVerdict(), today, week2); d.Action != Reject {
-			t.Fatal("hard day AFTER the plan not caught")
-		}
 		// Easy plan next to a hard day is fine.
+		week := &WeekContext{Days: []DayLoad{hardDay("2026-06-24")}}
 		if d := Vet(easyPlan, goVerdict(), today, week); d.Action != Pass {
 			t.Fatalf("easy next to hard = %s (%+v)", d.Action, d.Violations)
 		}
 	})
 
-	t.Run("fourth hard day in rolling 7 rejected", func(t *testing.T) {
+	t.Run("fourth hard day in any window rejected", func(t *testing.T) {
 		week := &WeekContext{Days: []DayLoad{
 			hardDay("2026-06-19"), hardDay("2026-06-21"), hardDay("2026-06-23"),
 		}}
 		d := Vet(hardPlan, goVerdict(), today, week)
-		found := false
-		for _, v := range d.Violations {
-			if strings.Contains(v.Bound, "giorni duri nella settimana") {
-				found = true
-			}
-		}
-		if d.Action != Reject || !found {
+		if d.Action != Reject {
 			t.Fatalf("4th hard day passed: %s %+v", d.Action, d.Violations)
+		}
+	})
+
+	t.Run("reverse-order week cannot evade (review CRITICAL)", func(t *testing.T) {
+		// Hard days planned AFTER the plan date: a suffix-only window never
+		// saw them; the straddling windows must.
+		week := &WeekContext{Days: []DayLoad{
+			hardDay("2026-06-27"), hardDay("2026-06-29"), hardDay("2026-06-30"),
+		}}
+		d := Vet(hardPlan, goVerdict(), today, week)
+		if d.Action != Reject {
+			t.Fatalf("future-stacked hard days evaded the gate: %s %+v", d.Action, d.Violations)
+		}
+		// Same for TSS: heavy FUTURE load must count in straddling windows.
+		weekTSS := &WeekContext{Days: []DayLoad{
+			executedDay("2026-06-26", 0, 0),
+			{Date: "2026-06-27", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 300}}},
+			{Date: "2026-06-29", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 290}}},
+		}}
+		d2 := Vet(easyPlan, goVerdict(), today, weekTSS)
+		if d2.Action != Reject {
+			t.Fatalf("future TSS overload evaded: %s %+v", d2.Action, d2.Violations)
 		}
 	})
 
 	t.Run("weekly TSS cumulates planned and executed", func(t *testing.T) {
 		week := &WeekContext{Days: []DayLoad{
-			easyDay("2026-06-20", 200), easyDay("2026-06-22", 200), easyDay("2026-06-24", 180),
+			executedDay("2026-06-20", 200, 0), executedDay("2026-06-22", 200, 0),
+			{Date: "2026-06-24", Cadenza: []PlannedLoad{{Sport: "ride", TSS: 180}}},
 		}}
-		d := Vet(easyPlan, goVerdict(), today, week) // ~29 TSS pushes past 600
-		found := false
-		for _, v := range d.Violations {
-			if strings.Contains(v.Bound, "TSS settimanale") {
-				found = true
-			}
-		}
-		if d.Action != Reject || !found {
+		d := Vet(easyPlan, goVerdict(), today, week)
+		if d.Action != Reject {
 			t.Fatalf("weekly TSS overload passed: %s %+v", d.Action, d.Violations)
 		}
-		// Outside the window it does not count.
-		old := &WeekContext{Days: []DayLoad{easyDay("2026-06-10", 580)}}
+		old := &WeekContext{Days: []DayLoad{executedDay("2026-06-10", 580, 0)}}
 		if d := Vet(easyPlan, goVerdict(), today, old); d.Action != Pass {
 			t.Fatalf("stale load counted: %s", d.Action)
 		}
 	})
 
-	t.Run("same-day external event rejects, own slot replaces", func(t *testing.T) {
-		ext := &WeekContext{Days: []DayLoad{{Date: "2026-06-25", Planned: true, External: true}}}
+	t.Run("same-day rules: external, executed, other-sport cadenza", func(t *testing.T) {
+		ext := &WeekContext{Days: []DayLoad{{Date: "2026-06-25", External: true}}}
 		if d := Vet(easyPlan, goVerdict(), today, ext); d.Action != Reject {
 			t.Fatal("stacking on athlete's own event allowed")
 		}
-		ours := &WeekContext{Days: []DayLoad{{Date: "2026-06-25", Planned: true, External: false, TSS: 50}}}
-		if d := Vet(easyPlan, goVerdict(), today, ours); d.Action != Pass {
-			t.Fatalf("own slot replacement rejected: %+v", d.Violations)
+		trained := &WeekContext{Days: []DayLoad{executedDay("2026-06-25", 60, 0)}}
+		if d := Vet(easyPlan, goVerdict(), today, trained); d.Action != Reject {
+			t.Fatal("second workout on an already-trained day allowed (review CRITICAL)")
+		}
+		walk := &WeekContext{Days: []DayLoad{executedDay("2026-06-25", 12, 0)}}
+		if d := Vet(easyPlan, goVerdict(), today, walk); d.Action != Pass {
+			t.Fatalf("a morning walk blocked the day: %+v", d.Violations)
+		}
+		otherSport := &WeekContext{Days: []DayLoad{{Date: "2026-06-25",
+			Cadenza: []PlannedLoad{{Sport: "ride", TSS: 50}}}}}
+		if d := Vet(easyPlan, goVerdict(), today, otherSport); d.Action != Reject {
+			t.Fatal("different-sport cadenza stacking allowed")
 		}
 	})
 
-	t.Run("same-day own load excluded from weekly sum (upsert replaces)", func(t *testing.T) {
-		week := &WeekContext{Days: []DayLoad{
-			{Date: "2026-06-25", TSS: 590, Planned: true}, // our own huge plan being replaced
-		}}
+	t.Run("own slot replaced: excluded from sums and same-day rule", func(t *testing.T) {
+		week := &WeekContext{Days: []DayLoad{{Date: "2026-06-25",
+			Cadenza: []PlannedLoad{{Sport: "Run", TSS: 590, HardSecs: 50 * 60}}}}}
 		if d := Vet(easyPlan, goVerdict(), today, week); d.Action != Pass {
-			t.Fatalf("replaced plan double-counted: %s %+v", d.Action, d.Violations)
+			t.Fatalf("replaced slot double-counted: %s %+v", d.Action, d.Violations)
+		}
+	})
+
+	t.Run("equality boundaries", func(t *testing.T) {
+		// Exactly 8 hard minutes = hard day; 7:59 is not.
+		justHard := plan("2026-06-25", step(8, 4), step(30, 2))
+		adj := &WeekContext{Days: []DayLoad{executedDay("2026-06-24", 70, hardDayMinSecs)}}
+		if d := Vet(justHard, goVerdict(), today, adj); d.Action != Reject {
+			t.Fatal("8-minute hard plan not counted as hard day")
+		}
+		almostAdj := &WeekContext{Days: []DayLoad{executedDay("2026-06-24", 70, hardDayMinSecs-1)}}
+		if d := Vet(justHard, goVerdict(), today, almostAdj); d.Action != Pass {
+			t.Fatalf("7:59 neighbor counted as hard: %+v", d.Violations)
 		}
 	})
 }

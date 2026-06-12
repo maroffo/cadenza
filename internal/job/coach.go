@@ -516,9 +516,13 @@ func (c *Coach) writeWorkout(ctx context.Context, sessionID string, v verdict.Ve
 		return "", fmt.Errorf("piano non decodificabile (campi sconosciuti inclusi): %w", err)
 	}
 	var week *safety.WeekContext
+	weekDegraded := false
 	if c.Events != nil {
 		week = buildWeekContext(ctx, c.Activities, c.Events, c.Plans, p.Date, today)
 		if week == nil {
+			// Silent degrade of a safety layer is its own failure mode: the
+			// athlete hears about it in the confirmation (review finding).
+			weekDegraded = true
 			slog.Warn("coach: cumulative gate degraded to per-workout rules")
 		}
 	}
@@ -555,8 +559,12 @@ func (c *Coach) writeWorkout(ctx context.Context, sessionID string, v verdict.Ve
 			"Presenta il piano all'atleta passo per passo nel messaggio: il calendario potrebbe essere sbagliato",
 			out.Attempts, strings.Join(out.Diffs, "; ")), nil
 	}
-	return fmt.Sprintf("Allenamento scritto e VERIFICATO sul calendario: %q il %s (event %d). "+
-		"Conferma all'atleta cosa troverà sull'orologio", p.Title, p.Date, out.EventID), nil
+	confirm := fmt.Sprintf("Allenamento scritto e VERIFICATO sul calendario: %q il %s (event %d). "+
+		"Conferma all'atleta cosa troverà sull'orologio", p.Title, p.Date, out.EventID)
+	if weekDegraded {
+		confirm += ". ATTENZIONE: regole settimanali cumulative NON verificate (calendario/attività non disponibili): dillo all'atleta"
+	}
+	return confirm, nil
 }
 
 // logInjury opens the injury (tightening: conservative by construction, no
@@ -646,6 +654,9 @@ func (c *Coach) listPlanned(ctx context.Context, today string) (string, error) {
 		r := row{Date: e.StartDateLocal[:10], Category: e.Category, Source: "atleta"}
 		if e.Name != nil {
 			r.Name = *e.Name
+			if len(r.Name) > 100 {
+				r.Name = r.Name[:100]
+			}
 		}
 		if e.ExternalID != nil && strings.HasPrefix(*e.ExternalID, "cadenza-") {
 			r.Source = "cadenza"

@@ -26,19 +26,21 @@ type PlanLookup interface {
 	LatestPlanFor(ctx context.Context, externalID string) (string, error)
 }
 
-// buildWeekContext assembles the rolling window [date-6, date+1] the
-// cumulative gate inspects (the +1 covers next-day hard adjacency).
+// buildWeekContext assembles [date-6, date+6]: the cumulative gate examines
+// every 7-day window containing the plan date (suffix-only was evadable by
+// writing a week in reverse order).
 //
-// Executed hardness uses the TOP THREE zones of the athlete's HR scheme:
-// on a 7-zone scheme that is SuperThreshold and above; on shorter schemes
-// it over-counts toward MORE hard seconds, which only ever tightens.
+// Executed hardness counts zone 4 and above of the athlete's scheme
+// (HRZoneTimes[3:]): our written Z4 resolves onto athlete zone 4, so the
+// planned and executed definitions of "hard" agree on any scheme length;
+// schemes shorter than 4 zones count everything (tightens, never loosens).
 func buildWeekContext(ctx context.Context, acts ActivitiesSource, events EventsSource, plans PlanLookup, date string, today string) *safety.WeekContext {
 	d, err := time.Parse("2006-01-02", date)
-	if err != nil {
+	if err != nil || acts == nil || events == nil {
 		return nil
 	}
 	oldest := d.AddDate(0, 0, -6).Format("2006-01-02")
-	newest := d.AddDate(0, 0, 1).Format("2006-01-02")
+	newest := d.AddDate(0, 0, 6).Format("2006-01-02")
 
 	loads := map[string]*safety.DayLoad{}
 	day := func(dt string) *safety.DayLoad {
@@ -59,11 +61,15 @@ func buildWeekContext(ctx context.Context, acts ActivitiesSource, events EventsS
 		}
 		dl := day(a.StartDateLocal[:10])
 		if a.TrainingLoad != nil {
-			dl.TSS += float64(*a.TrainingLoad)
+			dl.ExecutedTSS += float64(*a.TrainingLoad)
 		}
-		if n := len(a.HRZoneTimes); n >= 3 {
-			for _, secs := range a.HRZoneTimes[n-3:] {
-				dl.HardSecs += secs
+		if n := len(a.HRZoneTimes); n >= 4 {
+			for _, secs := range a.HRZoneTimes[3:] {
+				dl.ExecutedHardSecs += secs
+			}
+		} else {
+			for _, secs := range a.HRZoneTimes {
+				dl.ExecutedHardSecs += secs
 			}
 		}
 	}
@@ -82,7 +88,6 @@ func buildWeekContext(ctx context.Context, acts ActivitiesSource, events EventsS
 			continue // past planned events are represented by executed activities
 		}
 		dl := day(evDate)
-		dl.Planned = true
 		extID := ""
 		if e.ExternalID != nil {
 			extID = *e.ExternalID
@@ -91,20 +96,27 @@ func buildWeekContext(ctx context.Context, acts ActivitiesSource, events EventsS
 			dl.External = true
 			continue
 		}
+		sport := cadenzaSlotSport(extID)
 		if plans == nil {
+			// Content unknowable: treat as external so the gate refuses to
+			// stack on it (silent zero-load would UNDERCOUNT: review MAJOR).
+			dl.External = true
 			continue
 		}
 		planJSON, err := plans.LatestPlanFor(ctx, extID)
 		if err != nil || planJSON == "" {
-			slog.Warn("week context: ledger plan missing", "external_id", extID, "err", err)
+			slog.Warn("week context: ledger plan missing, day marked unknown", "external_id", extID, "err", err)
+			dl.External = true
 			continue
 		}
 		var p workout.Plan
 		if err := json.Unmarshal([]byte(planJSON), &p); err != nil {
+			dl.External = true
 			continue
 		}
-		dl.TSS += safety.EstimateTSS(p)
-		dl.HardSecs += safety.HardSeconds(p)
+		dl.Cadenza = append(dl.Cadenza, safety.PlannedLoad{
+			Sport: sport, TSS: safety.EstimateTSS(p), HardSecs: safety.HardSeconds(p),
+		})
 	}
 
 	out := &safety.WeekContext{}
@@ -112,4 +124,13 @@ func buildWeekContext(ctx context.Context, acts ActivitiesSource, events EventsS
 		out.Days = append(out.Days, *dl)
 	}
 	return out
+}
+
+// cadenzaSlotSport recovers the sport from a slot id cadenza-YYYY-MM-DD-<sport>.
+func cadenzaSlotSport(extID string) string {
+	parts := strings.Split(extID, "-")
+	if len(parts) < 5 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }

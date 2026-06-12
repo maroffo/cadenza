@@ -30,8 +30,8 @@ func (a ICU) ActivitiesRange(ctx context.Context, oldest, newest string) ([]icu.
 }
 
 // EventsRange lists calendar events in [oldest, newest], decoded.
-func (i ICU) EventsRange(ctx context.Context, oldest, newest string) ([]icu.Event, error) {
-	raw, err := i.C.ListEvents(ctx, icu.ListEventsParams{Oldest: oldest, Newest: newest})
+func (a ICU) EventsRange(ctx context.Context, oldest, newest string) ([]icu.Event, error) {
+	raw, err := a.C.ListEvents(ctx, icu.ListEventsParams{Oldest: oldest, Newest: newest})
 	if err != nil {
 		return nil, err
 	}

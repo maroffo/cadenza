@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -625,5 +626,34 @@ func TestIdentity_SeedAndLoadRoundTrip(t *testing.T) {
 	empty, err := p.Identity(ctx)
 	if err != nil || len(empty.Sports) != 0 {
 		t.Fatalf("missing identity = %+v, %v; want empty, nil", empty, err)
+	}
+}
+
+func TestLedger_LatestPlanFor(t *testing.T) {
+	client := emulatorClient(t)
+	l := NewLedger(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ext := fmt.Sprintf("cadenza-2099-02-02-run-%d", time.Now().UnixNano())
+
+	if err := l.Record(ctx, WriteRecord{Date: "2099-02-02", ExternalID: ext,
+		ContentHash: "aaaa", Status: "verified", PlanJSON: `{"title":"vecchio"}`}); err != nil {
+		t.Fatalf("record 1: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond) // created_at ordering needs distinct stamps
+	if err := l.Record(ctx, WriteRecord{Date: "2099-02-02", ExternalID: ext,
+		ContentHash: "bbbb", Status: "verified", PlanJSON: `{"title":"nuovo"}`}); err != nil {
+		t.Fatalf("record 2: %v", err)
+	}
+
+	got, err := l.LatestPlanFor(ctx, ext)
+	if err != nil {
+		t.Fatalf("LatestPlanFor: %v", err)
+	}
+	if !strings.Contains(got, "nuovo") {
+		t.Fatalf("got %q, want the NEWEST plan (the one on the calendar)", got)
+	}
+	if got, err := l.LatestPlanFor(ctx, "cadenza-ghost"); err != nil || got != "" {
+		t.Fatalf("no-match = %q, %v; want empty, nil", got, err)
 	}
 }

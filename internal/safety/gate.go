@@ -5,6 +5,7 @@ package safety
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/maroffo/cadenza/internal/verdict"
@@ -170,32 +171,63 @@ func zoneTop(s workout.Step) int {
 
 // --- Cumulative weekly rules (D34, M9.3) -----------------------------------
 // The per-workout ceilings bound ONE write; nothing stopped three hard days
-// in a row across separate writes (review finding). These rules see the
-// rolling week around the plan date. All Tier A: code, immutable.
+// in a row across separate writes (review finding). These rules examine
+// EVERY rolling 7-day window containing the plan date: a suffix-only window
+// was evadable by writing the week in reverse order (review CRITICAL).
 
 const (
-	maxWeeklyTSS    = 600.0 // planned+executed, rolling 7 days ending at plan date
-	maxHardDaysPer7 = 3
-	hardDayMinSecs  = 8 * 60 // a day with >=8 hard minutes counts as a hard day
+	maxWeeklyTSS      = 600.0 // planned+executed, any rolling 7-day window
+	maxHardDaysPer7   = 3
+	hardDayMinSecs    = 8 * 60 // a day with >=8 hard minutes counts as a hard day
+	dayOccupiedTSSMin = 25.0   // executed load that marks the day as already trained
 )
 
-// DayLoad summarizes one day the gate can see: executed (from icu) or
-// planned (from our ledger / icu events).
-type DayLoad struct {
-	Date     string
+// PlannedLoad is one cadenza-planned workout on a day (per sport slot).
+type PlannedLoad struct {
+	Sport    string
 	TSS      float64
 	HardSecs int
-	Planned  bool // a planned event exists this day
-	External bool // planned by the athlete outside cadenza (content unknown)
 }
 
-// WeekContext is the rolling window the coach assembles; nil means the
-// cumulative rules are skipped (per-workout Tier A still applies).
+// DayLoad keeps the day's load in components so the gate can exclude ONLY
+// the slot a new plan replaces, never the executed work or other events.
+type DayLoad struct {
+	Date             string
+	ExecutedTSS      float64
+	ExecutedHardSecs int
+	Cadenza          []PlannedLoad
+	External         bool // an event planned outside cadenza (content unknown)
+}
+
+func (d DayLoad) tssExcluding(sport string) float64 {
+	t := d.ExecutedTSS
+	for _, c := range d.Cadenza {
+		if !strings.EqualFold(c.Sport, sport) {
+			t += c.TSS
+		}
+	}
+	return t
+}
+
+func (d DayLoad) hardSecsExcluding(sport string) int {
+	h := d.ExecutedHardSecs
+	for _, c := range d.Cadenza {
+		if !strings.EqualFold(c.Sport, sport) {
+			h += c.HardSecs
+		}
+	}
+	return h
+}
+
+// WeekContext is the [date-6, date+6] window the coach assembles; nil means
+// the cumulative rules are skipped (per-workout Tier A still applies).
 type WeekContext struct {
 	Days []DayLoad
 }
 
-// vetWeek applies the cumulative rules for a plan landing on date.
+// vetWeek applies the cumulative rules for a plan landing on p.Date. The
+// plan's own slot (same date AND sport) is excluded everywhere: the
+// slot-keyed upsert replaces it. Everything else on that day counts.
 func vetWeek(d *Decision, p workout.Plan, week *WeekContext) {
 	if week == nil {
 		return
@@ -206,52 +238,85 @@ func vetWeek(d *Decision, p workout.Plan, week *WeekContext) {
 			d.Action = Reject
 		}
 	}
+
 	planHard := HardSeconds(p)
 	planTSS := EstimateTSS(p)
-
 	loads := map[string]DayLoad{}
 	for _, dl := range week.Days {
 		loads[dl.Date] = dl
 	}
 
-	// Same-day external planning: never stack on the athlete's own event.
-	if dl, ok := loads[p.Date]; ok && dl.External {
-		reject("giorno già pianificato",
-			"evento esterno presente su "+p.Date,
-			"un solo workout al giorno: chiedi all'atleta se sostituirlo")
-	}
-
-	// Rolling 7 days ending at the plan date.
-	weekTSS := planTSS
-	hardDays := 0
-	if planHard >= hardDayMinSecs {
-		hardDays = 1
-	}
-	for _, dl := range week.Days {
-		if dl.Date == p.Date {
-			continue // replaced by the new plan (slot-keyed upsert)
-		}
-		if withinWindow(dl.Date, p.Date, 6) {
-			weekTSS += dl.TSS
-			if dl.HardSecs >= hardDayMinSecs {
-				hardDays++
+	// One workout per day (original Tier A ceiling): anything else already
+	// on the plan date that is NOT the replaced slot occupies the day.
+	if dl, ok := loads[p.Date]; ok {
+		switch {
+		case dl.External:
+			reject("giorno già pianificato", "evento esterno presente su "+p.Date,
+				"un solo workout al giorno: chiedi all'atleta se sostituirlo")
+		case dl.ExecutedTSS >= dayOccupiedTSSMin:
+			reject("giorno già allenato", fmt.Sprintf("attività eseguita oggi (TSS %.0f)", dl.ExecutedTSS),
+				"un solo workout al giorno")
+		default:
+			for _, c := range dl.Cadenza {
+				if !strings.EqualFold(c.Sport, p.Sport) {
+					reject("giorno già pianificato",
+						"workout cadenza "+c.Sport+" presente su "+p.Date,
+						"un solo workout al giorno")
+					break
+				}
 			}
 		}
 	}
-	if weekTSS > maxWeeklyTSS {
+
+	// Day-level load with the new plan in place of its own slot.
+	dayTSS := func(date string) float64 {
+		dl := loads[date]
+		if date == p.Date {
+			return dl.tssExcluding(p.Sport) + planTSS
+		}
+		return dl.tssExcluding("") // executed + all cadenza
+	}
+	dayHard := func(date string) int {
+		dl := loads[date]
+		if date == p.Date {
+			return dl.hardSecsExcluding(p.Sport) + planHard
+		}
+		return dl.hardSecsExcluding("")
+	}
+
+	// EVERY 7-day window containing the plan date.
+	worstTSS, worstHard := 0.0, 0
+	for endOff := 0; endOff <= 6; endOff++ {
+		end := addDays(p.Date, endOff)
+		tss, hard := 0.0, 0
+		for back := 0; back <= 6; back++ {
+			date := addDays(end, -back)
+			tss += dayTSS(date)
+			if dayHard(date) >= hardDayMinSecs {
+				hard++
+			}
+		}
+		if tss > worstTSS {
+			worstTSS = tss
+		}
+		if hard > worstHard {
+			worstHard = hard
+		}
+	}
+	if worstTSS > maxWeeklyTSS {
 		reject("TSS settimanale cumulato",
-			fmt.Sprintf("%.0f nei 7 giorni fino a %s", weekTSS, p.Date),
+			fmt.Sprintf("%.0f in una finestra di 7 giorni intorno a %s", worstTSS, p.Date),
 			fmt.Sprintf("max %.0f (pianificato+eseguito)", maxWeeklyTSS))
 	}
-	if hardDays > maxHardDaysPer7 {
+	if worstHard > maxHardDaysPer7 {
 		reject("giorni duri nella settimana",
-			fmt.Sprintf("%d", hardDays), fmt.Sprintf("max %d su 7 giorni", maxHardDaysPer7))
+			fmt.Sprintf("%d", worstHard), fmt.Sprintf("max %d su 7 giorni", maxHardDaysPer7))
 	}
 
 	// Consecutive hard days: the reviewers' exact scenario.
 	if planHard >= hardDayMinSecs {
 		for _, adj := range []string{addDays(p.Date, -1), addDays(p.Date, 1)} {
-			if dl, ok := loads[adj]; ok && dl.HardSecs >= hardDayMinSecs {
+			if dayHard(adj) >= hardDayMinSecs {
 				reject("giorni duri consecutivi",
 					"giorno duro adiacente: "+adj,
 					"mai due giorni duri di fila (recupero strutturale master)")
@@ -269,16 +334,6 @@ func HardSeconds(p workout.Plan) int {
 		}
 	}
 	return total
-}
-
-func withinWindow(date, end string, days int) bool {
-	d, err1 := time.Parse("2006-01-02", date)
-	e, err2 := time.Parse("2006-01-02", end)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	diff := int(e.Sub(d).Hours() / 24)
-	return diff >= 0 && diff <= days
 }
 
 func addDays(date string, n int) string {
