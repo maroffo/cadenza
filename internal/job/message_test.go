@@ -488,3 +488,94 @@ func TestMessage_WebCommandOffWhenUnconfigured(t *testing.T) {
 		t.Errorf("off notice missing: %v", out.plain)
 	}
 }
+
+type stubCheckins struct{ fields []string }
+
+func (s *stubCheckins) SetField(_ context.Context, date, field, value string) error {
+	s.fields = append(s.fields, date+":"+field+":"+value)
+	return nil
+}
+
+type stubKeyboardMsg struct {
+	sent  [][2]string
+	texts []string
+}
+
+func (s *stubKeyboardMsg) SendKeyboard(_ context.Context, text string, buttons [][2]string) error {
+	s.texts = append(s.texts, text)
+	s.sent = append(s.sent, [2]string{buttons[0][1], buttons[len(buttons)-1][1]})
+	return nil
+}
+
+func TestMessage_CheckinFlowTwoTaps(t *testing.T) {
+	out := &stubInteractor{}
+	ci := &stubCheckins{}
+	kb := &stubKeyboardMsg{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Checkins = ci
+	m.Keyboard = kb
+
+	// Tap 1: feeling -> recorded + the time question chains.
+	cb := fmt.Sprintf(`{"update_id":90,"callback_query":{"id":"cb","data":"ci:2026-06-12:feel:stanco","from":{"id":%d}}}`, allowedID)
+	if err := m.Run(context.Background(), envelopeFor(t, 90, cb)); err != nil {
+		t.Fatalf("feel tap: %v", err)
+	}
+	if len(ci.fields) != 1 || ci.fields[0] != "2026-06-12:feeling:stanco" {
+		t.Fatalf("fields = %v", ci.fields)
+	}
+	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "tempo") {
+		t.Fatalf("time question not chained: %v", kb.texts)
+	}
+	if !strings.HasPrefix(kb.sent[0][0], "ci:2026-06-12:time:") {
+		t.Errorf("time buttons = %v", kb.sent)
+	}
+
+	// Tap 2: time -> recorded + ack.
+	cb2 := fmt.Sprintf(`{"update_id":91,"callback_query":{"id":"cb","data":"ci:2026-06-12:time:short","from":{"id":%d}}}`, allowedID)
+	if err := m.Run(context.Background(), envelopeFor(t, 91, cb2)); err != nil {
+		t.Fatalf("time tap: %v", err)
+	}
+	if len(ci.fields) != 2 || ci.fields[1] != "2026-06-12:time_budget:short" {
+		t.Fatalf("fields = %v", ci.fields)
+	}
+	if len(out.plain) == 0 || !strings.Contains(out.plain[len(out.plain)-1], "Segnato") {
+		t.Errorf("ack missing: %v", out.plain)
+	}
+}
+
+func TestMessage_CheckinDolorantePointsToInjuryFlow(t *testing.T) {
+	out := &stubInteractor{}
+	ci := &stubCheckins{}
+	kb := &stubKeyboardMsg{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Checkins = ci
+	m.Keyboard = kb
+
+	cb := fmt.Sprintf(`{"update_id":92,"callback_query":{"id":"cb","data":"ci:2026-06-12:feel:dolorante","from":{"id":%d}}}`, allowedID)
+	if err := m.Run(context.Background(), envelopeFor(t, 92, cb)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "DOVE ti fa male") {
+		t.Errorf("injury nudge missing: %v", out.plain)
+	}
+	if len(kb.texts) != 1 {
+		t.Error("time question must still chain after dolorante")
+	}
+}
+
+func TestMessage_CheckinMalformedIgnored(t *testing.T) {
+	out := &stubInteractor{}
+	ci := &stubCheckins{}
+	m := newMessage(out, newStubDedup(), &stubChats{})
+	m.Checkins = ci
+
+	for n, bad := range []string{"ci:2026-06-12:feel:fortissimo", "ci:x", "ci:d:time:"} {
+		cb := fmt.Sprintf(`{"update_id":%d,"callback_query":{"id":"cb","data":%q,"from":{"id":%d}}}`, 93+n, bad, allowedID)
+		if err := m.Run(context.Background(), envelopeFor(t, int64(93+n), cb)); err != nil {
+			t.Fatalf("%q: %v", bad, err)
+		}
+	}
+	if len(ci.fields) != 0 {
+		t.Fatalf("malformed taps recorded: %v", ci.fields)
+	}
+}

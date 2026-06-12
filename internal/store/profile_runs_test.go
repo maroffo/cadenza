@@ -657,3 +657,40 @@ func TestLedger_LatestPlanFor(t *testing.T) {
 		t.Fatalf("no-match = %q, %v; want empty, nil", got, err)
 	}
 }
+
+func TestCheckins_SetAndGetMerge(t *testing.T) {
+	client := emulatorClient(t)
+	c := NewCheckins(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	date := fmt.Sprintf("2099-ci-%d", time.Now().UnixNano())
+
+	if err := c.SetField(ctx, date, "feeling", "stanco"); err != nil {
+		t.Fatalf("SetField: %v", err)
+	}
+	if err := c.SetField(ctx, date, "time_budget", "short"); err != nil {
+		t.Fatalf("SetField 2: %v", err)
+	}
+	// Re-tap overwrites (latest word wins).
+	if err := c.SetField(ctx, date, "feeling", "dolorante"); err != nil {
+		t.Fatalf("SetField 3: %v", err)
+	}
+	ci, err := c.Get(ctx, date)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if ci.Feeling != "dolorante" || ci.TimeBudget != "short" {
+		t.Fatalf("checkin = %+v", ci)
+	}
+	if ci.ExpiresAt.IsZero() {
+		t.Error("no ExpiresAt: TTL has nothing to act on")
+	}
+	// Unknown field rejected; missing day = empty.
+	if err := c.SetField(ctx, date, "mood", "x"); err == nil {
+		t.Fatal("unknown field accepted")
+	}
+	empty, err := c.Get(ctx, "2099-mai")
+	if err != nil || empty.Feeling != "" {
+		t.Fatalf("missing = %+v, %v", empty, err)
+	}
+}

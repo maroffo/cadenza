@@ -777,3 +777,60 @@ func TestMorning_EventsDownSkipsLineQuietly(t *testing.T) {
 		t.Error("line rendered despite events failure")
 	}
 }
+
+func TestMorning_CheckinKeyboardAfterMessage(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	kb := &stubKeyboardMsg{}
+	m.Keyboard = kb
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(kb.texts) != 1 || !strings.Contains(kb.texts[0], "Come ti senti") {
+		t.Fatalf("checkin question missing: %v", kb.texts)
+	}
+	if !strings.HasPrefix(kb.sent[0][0], "ci:2026-06-10:feel:") {
+		t.Errorf("buttons = %v", kb.sent)
+	}
+}
+
+type stubCheckinSource struct{ ci store.Checkin }
+
+func (s stubCheckinSource) Get(context.Context, string) (store.Checkin, error) {
+	return s.ci, nil
+}
+
+func TestMorning_CheckinFillsVerdictGapsOnly(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	// Green day WITHOUT icu subjective data: the tap fills the gap and the
+	// D32 fatigue rule fires (conservative-only).
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Checkins = stubCheckinSource{ci: store.Checkin{Feeling: "stanco", TimeBudget: "short"}}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if runs.completed["2026-06-10"] != "MODIFY" {
+		t.Fatalf("status = %q, want MODIFY (athlete says stanco)", runs.completed["2026-06-10"])
+	}
+	if !strings.Contains(out.bodies[0], "Check-in:</b> stanco · tempo ridotto") {
+		t.Errorf("checkin line missing:\n%s", out.bodies[0])
+	}
+
+	// Device data present: the tap must NOT override it.
+	day := green("2026-06-10")
+	one := 1
+	day.Fatigue = &one // device says fresh
+	m2 := newMorning(stubWellness{days: []icu.Wellness{day}}, &stubMessenger{}, newStubRuns())
+	m2.Checkins = stubCheckinSource{ci: store.Checkin{Feeling: "stanco"}}
+	_, in, err := m2.prepare(context.Background(), "2026-06-10")
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if *in.Today.Fatigue != 1 {
+		t.Fatalf("tap overrode device data: fatigue=%d", *in.Today.Fatigue)
+	}
+}

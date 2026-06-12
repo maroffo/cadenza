@@ -217,6 +217,8 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Runs:     runs,
 		Injuries: injuries,
 		Events:   job.ICU{C: icuClient},
+		Checkins: store.NewCheckins(fsClient),
+		Keyboard: sender,
 		Retry:    retry,
 		Now:      time.Now,
 		TZ:       tz,
@@ -263,6 +265,8 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		message.Muts = store.NewMutations(fsClient)
 	}
 	message.InjuryFlow = &injuryJob
+	message.Checkins = store.NewCheckins(fsClient)
+	message.Keyboard = sender
 	// M8 dashboard: enabled when the web secret exists.
 	var webServer *web.Server
 	if cfg.WebSessionSecret != "" && cfg.ExecutorAudience != "" {

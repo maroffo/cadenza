@@ -61,6 +61,10 @@ type Message struct {
 	Muts MutationResolver
 	// InjuryFlow handles inj: check-in callbacks; nil ignores them.
 	InjuryFlow *InjuryJob
+	// Checkins records ci: morning taps; nil ignores them.
+	Checkins CheckinRecorder
+	// Keyboard chains the second check-in question.
+	Keyboard KeyboardSender
 	// WebLink mints dashboard magic links for /web; nil = feature off.
 	WebLink func() string
 }
@@ -229,8 +233,58 @@ func (m Message) handleCallback(ctx context.Context, u *tgUpdate) error {
 		}
 		return m.Out.Send(ctx, reply)
 	}
+	if date, field, value, ok := parseCheckinCallback(u.CallbackQuery.Data); ok && m.Checkins != nil {
+		if err := m.Checkins.SetField(ctx, date, field, value); err != nil {
+			return fmt.Errorf("message: checkin: %w", err)
+		}
+		if field == "feeling" {
+			if value == "dolorante" {
+				if err := m.Out.Send(ctx, "🤕 Registrato. Dimmi in chat DOVE ti fa male, così lo tracciamo e proteggo il piano."); err != nil {
+					return err
+				}
+			}
+			if m.Keyboard != nil {
+				return m.Keyboard.SendKeyboard(ctx, "⏱ Quanto tempo hai per allenarti oggi?", checkinTimeButtons(date))
+			}
+			return nil
+		}
+		return m.Out.Send(ctx, "👍 Segnato. Il coach ne tiene conto per oggi.")
+	}
 	slog.Info("message: unhandled callback data", "data", u.CallbackQuery.Data)
 	return nil
+}
+
+// CheckinRecorder persists morning taps; satisfied by store.Checkins.
+type CheckinRecorder interface {
+	SetField(ctx context.Context, date, field, value string) error
+}
+
+// parseCheckinCallback decodes "ci:<date>:feel|time:<value>".
+func parseCheckinCallback(data string) (date, field, value string, ok bool) {
+	rest, found := strings.CutPrefix(data, "ci:")
+	if !found {
+		return "", "", "", false
+	}
+	parts := strings.Split(rest, ":")
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	date = parts[0]
+	switch parts[1] {
+	case "feel":
+		field = "feeling"
+		switch parts[2] {
+		case "bene", "cosi", "stanco", "dolorante":
+			return date, field, parts[2], true
+		}
+	case "time":
+		field = "time_budget"
+		switch parts[2] {
+		case "full", "short", "none":
+			return date, field, parts[2], true
+		}
+	}
+	return "", "", "", false
 }
 
 // parseInjuryCallback decodes "inj:<id>:<rev>:better|same|worse|resolve".
