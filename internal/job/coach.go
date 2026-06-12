@@ -296,11 +296,62 @@ func (c *Coach) profilePrefix(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	identity, err := c.Profiles.Identity(ctx)
+	if err != nil {
+		// Identity enriches; its absence degrades to the day-one behavior
+		// (the coach asks), never blocks the conversation.
+		slog.Warn("coach: identity unavailable", "err", err)
+		identity = store.Identity{}
+	}
 	var b strings.Builder
 	b.WriteString("PROFILO ATLETA (calcolato dal sistema):\n")
 	fmt.Fprintf(&b, "- Baseline HRV: %.1f (SD %.1f)\n", baselines.HRVMean, baselines.HRVSD)
 	fmt.Fprintf(&b, "- Baseline FC riposo: %.1f bpm\n", baselines.RestingHR)
 	fmt.Fprintf(&b, "- Tetto rampa CTL: %.1f/settimana\n", rampCap)
+	if len(identity.Sports) > 0 {
+		fmt.Fprintf(&b, "- Sport (in ordine di priorità): %s\n", strings.Join(identity.Sports, ", "))
+	}
+	if identity.Availability != "" {
+		fmt.Fprintf(&b, "- Disponibilità tipo: %s\n", identity.Availability)
+	}
+	for _, race := range identity.Races {
+		line := fmt.Sprintf("- Gara %s: %s (%s)", race.Priority, race.Name, race.Date)
+		if d, err := time.Parse(dateOnly, race.Date); err == nil {
+			days := int(d.Sub(c.Now().In(c.TZ).Truncate(24*time.Hour)).Hours() / 24)
+			if days >= 0 {
+				line += fmt.Sprintf(": mancano %d giorni", days)
+			} else {
+				line += " (passata)"
+			}
+		}
+		if race.Notes != "" {
+			line += ". " + race.Notes
+		}
+		b.WriteString(line + "\n")
+	}
+	if identity.InjuryHistory != "" {
+		fmt.Fprintf(&b, "- Storia infortuni: %s\n", identity.InjuryHistory)
+	}
+	if identity.Preferences != "" {
+		fmt.Fprintf(&b, "- Preferenze: %s\n", identity.Preferences)
+	}
+	for _, z := range identity.Zones {
+		fmt.Fprintf(&b, "- Zone HR %s (LTHR %d, max %d): ", z.Sport, z.LTHR, z.MaxHR)
+		for i, upper := range z.Zones {
+			name := fmt.Sprintf("Z%d", i+1)
+			if i < len(z.ZoneName) {
+				name = z.ZoneName[i]
+			}
+			if i > 0 {
+				b.WriteString(" · ")
+			}
+			fmt.Fprintf(&b, "%s ≤%d", name, upper)
+		}
+		b.WriteString("\n")
+	}
+	if len(identity.Zones) > 0 {
+		b.WriteString("  (per write_workout usa SEMPRE lo schema Z1-5: il server li risolve sulle zone reali)\n")
+	}
 	if len(rules) > 0 {
 		// Framing matters: rule texts are athlete DATA, not instructions.
 		// Without it a crafted-then-confirmed rule reads like prompt.

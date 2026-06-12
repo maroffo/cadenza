@@ -785,3 +785,56 @@ func newCoachLLM(t *testing.T, injuryInput string) *fakes.Anthropic {
 		fakes.Text{S: "Registrato: ci andiamo piano e ci risentiamo tra due giorni."},
 	)
 }
+
+func TestProfilePrefix_RendersIdentity(t *testing.T) {
+	llm := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	c.Profiles = stubProfile{identity: store.Identity{
+		Sports:       []string{"Ride", "Run"},
+		Races:        []store.Race{{Name: "Granfondo X", Date: "2026-06-24", Priority: "A", Notes: "sotto le 5h"}},
+		Availability: "60-75 min feriali",
+		Zones: []store.SportZones{{
+			Sport: "Ride", LTHR: 162, MaxHR: 179,
+			Zones:    []int{130, 144, 151, 161, 165, 170, 179},
+			ZoneName: []string{"Recovery", "Aerobic", "Tempo", "SubThreshold", "SuperThreshold", "Aerobic Capacity", "Anaerobic"},
+		}},
+	}}
+
+	if err := c.Converse(context.Background(), "ciao"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	raw := string(llm.Requests[0].Raw)
+	for _, want := range []string{
+		"Sport (in ordine di priorità): Ride, Run",
+		"Gara A: Granfondo X (2026-06-24): mancano 14 giorni", // fixedNow = 2026-06-10
+		"sotto le 5h",
+		"Disponibilità tipo: 60-75 min feriali",
+		"Zone HR Ride (LTHR 162, max 179)",
+		"SubThreshold ≤161",
+		"schema Z1-5",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("prefix missing %q", want)
+		}
+	}
+}
+
+func TestProfilePrefix_EmptyIdentityDegradesToDayOne(t *testing.T) {
+	llm := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer llm.Close()
+	c, out, _, _, _, _ := newCoach(t, llm) // stubProfile zero value = empty identity
+
+	if err := c.Converse(context.Background(), "ciao"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	raw := string(llm.Requests[0].Raw)
+	for _, forbidden := range []string{"Sport (in ordine", "Gara ", "Zone HR"} {
+		if strings.Contains(raw, forbidden) {
+			t.Errorf("empty identity rendered %q", forbidden)
+		}
+	}
+	if len(out.bodies) != 1 {
+		t.Fatal("reply missing")
+	}
+}

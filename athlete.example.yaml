@@ -4,3 +4,22 @@
 # CTL ramp cap per week. Spec default for masters athletes 45+: 4.0-5.0.
 # The code ceiling (Tier A) is 6.0 regardless of what is written here.
 ramp_cap: 4.0
+
+# Sport in ordine di priorità (nomi tipo intervals.icu: Ride, Run, Swim...).
+sports: [Ride, Run]
+
+# Gare/obiettivi datati: il coach conta i giorni e periodizza di conseguenza.
+races:
+  - name: "Granfondo Esempio"
+    date: "2026-09-20"
+    priority: A
+    notes: "obiettivo finire sotto le 5h"
+
+# Disponibilità settimanale tipo (testo libero, parla al coach).
+availability: "60-75 min nei feriali a pranzo o sera; lungo possibile sab o dom mattina"
+
+# Storia infortuni rilevante (il registro vivo è in Firestore; qui il contesto).
+injury_history: "nessuna storia rilevante"
+
+# Preferenze e vincoli che il coach deve conoscere.
+preferences: "preferisce zwift se piove; odia i lavori in pista"

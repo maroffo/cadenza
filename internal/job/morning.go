@@ -40,6 +40,7 @@ type WellnessSource interface {
 // ProfileSource provides the athlete's baselines and tunable ramp cap.
 type ProfileSource interface {
 	Profile(ctx context.Context) (verdict.Baselines, float64, error)
+	Identity(ctx context.Context) (store.Identity, error)
 }
 
 // Messenger delivers coaching messages; satisfied by telegram.Sender.
