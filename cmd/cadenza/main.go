@@ -210,6 +210,15 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Injuries: injuries, Out: sender, Keyboard: sender, Retry: retry,
 		Now: time.Now, TZ: tz,
 	}
+	debrief := job.Debrief{
+		Activities: job.ICU{C: icuClient},
+		Events:     job.ICU{C: icuClient},
+		Plans:      store.NewLedger(fsClient),
+		Marks:      store.NewDebriefs(fsClient),
+		Out:        sender,
+		Now:        time.Now,
+		TZ:         tz,
+	}
 	morning := job.Morning{
 		Wellness: job.ICU{C: icuClient},
 		Profiles: store.NewProfiles(fsClient),
@@ -219,6 +228,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		Events:   job.ICU{C: icuClient},
 		Checkins: store.NewCheckins(fsClient),
 		Keyboard: sender,
+		Debrief:  &debrief,
 		Retry:    retry,
 		Now:      time.Now,
 		TZ:       tz,
@@ -234,6 +244,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 	if cfg.AnthropicAPIKey != "" {
 		llm := agent.NewClient(cfg.AnthropicAPIKey, cfg.AnthropicBaseURL)
 		morning.Narrator = agent.Narrator{Client: llm, Model: cfg.ModelCheap}
+		debrief.Narrator = agent.Debriefer{Client: llm, Model: cfg.ModelCheap}
 		morning.Sessions = store.NewSessions(fsClient)
 		morning.ModelName = cfg.ModelCheap
 
@@ -307,5 +318,5 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		}
 	}
 	watchdog := job.Watchdog{Runs: runs, Out: sender, Now: time.Now, TZ: tz}
-	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob}, webServer, nil
+	return job.Deps{Morning: morning, Watchdog: watchdog, Message: message, Injury: injuryJob, Debrief: debrief}, webServer, nil
 }

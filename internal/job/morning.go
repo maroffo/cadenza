@@ -88,6 +88,8 @@ type Morning struct {
 	// Checkins + Keyboard power the 2-tap subjective check-in (M9.4).
 	Checkins CheckinSource
 	Keyboard KeyboardSender
+	// Debrief piggybacks the morning run (M9.5); nil skips.
+	Debrief *Debrief
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
@@ -179,6 +181,13 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	if m.Keyboard != nil {
 		if err := m.Keyboard.SendKeyboard(ctx, "🙋 Come ti senti stamattina?", checkinFeelButtons(today)); err != nil {
 			slog.Warn("morning: checkin keyboard failed", "err", err)
+		}
+	}
+	// Debrief piggyback (M9.5): yesterday's evening workouts get their
+	// debrief now; the sweep is Create-once so the 19:30 run never repeats.
+	if m.Debrief != nil {
+		if err := m.Debrief.Sweep(ctx); err != nil {
+			slog.Warn("morning: debrief sweep failed", "err", err)
 		}
 	}
 	return nil

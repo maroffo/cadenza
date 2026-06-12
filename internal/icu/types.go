@@ -111,6 +111,9 @@ type Activity struct {
 	Decoupling       *float64 `json:"decoupling,omitempty"`
 	HRZoneTimes      []int    `json:"icu_hr_zone_times,omitempty"`
 	Kcal             *int     `json:"calories,omitempty"`
+	// Subjective post-activity signals (debrief: percepito vs oggettivo).
+	RPE  *int `json:"icu_rpe,omitempty"` // 1-10 athlete-reported
+	Feel *int `json:"feel,omitempty"`    // 1-5, 1 = great
 }
 
 // DecodeActivities parses the raw payload of ListActivities.
