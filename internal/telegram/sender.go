@@ -62,6 +62,24 @@ func (s *Sender) Send(ctx context.Context, text string) error {
 	return nil
 }
 
+// SendAnimation sends a GIF/animation by file_id OR URL (Telegram accepts both
+// as a string). Returns the Telegram file_id of the sent animation so callers
+// can cache it: re-sending by file_id avoids re-fetching the source.
+func (s *Sender) SendAnimation(ctx context.Context, source, caption string) (string, error) {
+	msg, err := s.b.SendAnimation(ctx, &bot.SendAnimationParams{
+		ChatID:    s.chatID,
+		Animation: &models.InputFileString{Data: source},
+		Caption:   caption,
+	})
+	if err != nil {
+		return "", err
+	}
+	if msg.Animation == nil {
+		return "", nil
+	}
+	return msg.Animation.FileID, nil
+}
+
 // AnswerCallback acknowledges a callback query. Mandatory after every tap or
 // the client shows a stuck spinner for up to a minute.
 func (s *Sender) AnswerCallback(ctx context.Context, callbackID string) error {

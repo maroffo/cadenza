@@ -20,6 +20,7 @@ import (
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/config"
+	"github.com/maroffo/cadenza/internal/exercises"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/icuwrite"
 	"github.com/maroffo/cadenza/internal/job"
@@ -250,26 +251,30 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 
 		chats := store.NewChats(fsClient)
 		message.Coach = &job.Coach{
-			Agent:      agent.Coach{Client: llm, Model: cfg.ModelDeep},
-			Wellness:   job.ICU{C: icuClient},
-			Activities: job.ICU{C: icuClient},
-			Profiles:   store.NewProfiles(fsClient),
-			Rules:      store.NewRules(fsClient),
-			RuleCount:  store.NewRules(fsClient),
-			Muts:       store.NewMutations(fsClient),
-			Budget:     store.NewBudget(fsClient),
-			Sessions:   store.NewSessions(fsClient),
-			Chats:      chats,
-			Status:     morning,
-			Out:        sender,
-			Confirm:    sender,
-			Writer:     &icuwrite.Writer{C: icuClient},
-			Ledger:     store.NewLedger(fsClient),
-			Events:     job.ICU{C: icuClient},
-			Plans:      store.NewLedger(fsClient),
-			Summary:    agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
-			Now:        time.Now,
-			TZ:         tz,
+			Agent:            agent.Coach{Client: llm, Model: cfg.ModelDeep},
+			Wellness:         job.ICU{C: icuClient},
+			Activities:       job.ICU{C: icuClient},
+			Profiles:         store.NewProfiles(fsClient),
+			Rules:            store.NewRules(fsClient),
+			RuleCount:        store.NewRules(fsClient),
+			Muts:             store.NewMutations(fsClient),
+			Budget:           store.NewBudget(fsClient),
+			Sessions:         store.NewSessions(fsClient),
+			Chats:            chats,
+			Status:           morning,
+			Out:              sender,
+			Confirm:          sender,
+			Writer:           &icuwrite.Writer{C: icuClient},
+			Ledger:           store.NewLedger(fsClient),
+			Events:           job.ICU{C: icuClient},
+			Plans:            store.NewLedger(fsClient),
+			Summary:          agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
+			Catalog:          exercises.MustLoad(),
+			MediaCache:       store.NewMediaCache(fsClient),
+			Animator:         sender,
+			DefaultEquipment: cfg.DefaultEquipment,
+			Now:              time.Now,
+			TZ:               tz,
 		}
 		message.Coach.Injuries = injuries
 		message.Coach.InjurySched = injuryJob
