@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -40,6 +41,11 @@ type Config struct {
 	// WebSessionSecret signs dashboard magic links and cookies (M8).
 	// Empty = dashboard disabled.
 	WebSessionSecret string
+
+	// DefaultEquipment is the athlete's standing home kit (decision 9), surfaced
+	// to the coach so it need not be restated every conversation. Empty = full
+	// kit assumed. Per-day conversational overrides still take precedence.
+	DefaultEquipment []string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -80,6 +86,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	cfg.ModelCheap = orDefault(getenv("MODEL_CHEAP"), "claude-haiku-4-5-20251001")
 	cfg.ModelDeep = orDefault(getenv("MODEL_DEEP"), "claude-opus-4-8")
 	cfg.WebSessionSecret = getenv("WEB_SESSION_SECRET")
+	cfg.DefaultEquipment = splitCSV(getenv("CADENZA_DEFAULT_EQUIPMENT"))
 
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)
@@ -112,4 +119,23 @@ func orDefault(v, def string) string {
 		return def
 	}
 	return v
+}
+
+// splitCSV parses a comma-separated env value into a trimmed slice, dropping
+// empty entries. Empty or all-blank input yields nil (field stays unset).
+func splitCSV(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

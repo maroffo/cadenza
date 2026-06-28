@@ -131,6 +131,45 @@ func TestLoad_ProdRequirements(t *testing.T) {
 	})
 }
 
+func TestLoad_DefaultEquipment(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{"trims and splits", "dumbbell, band ,kettlebell", []string{"dumbbell", "band", "kettlebell"}},
+		{"unset is nil", "", nil},
+		{"only separators and blanks is nil", "  ,  ,", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := map[string]string{}
+			if tc.raw != "" {
+				m["CADENZA_DEFAULT_EQUIPMENT"] = tc.raw
+			}
+			cfg, err := Load(env(m))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if !equalStrings(cfg.DefaultEquipment, tc.want) {
+				t.Errorf("DefaultEquipment = %#v, want %#v", cfg.DefaultEquipment, tc.want)
+			}
+		})
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestLoad_BadRateRejected(t *testing.T) {
 	for _, raw := range []string{"fast", "0", "-1"} {
 		t.Run(raw, func(t *testing.T) {

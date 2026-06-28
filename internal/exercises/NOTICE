@@ -1,0 +1,27 @@
+Exercise catalog data
+======================
+
+The exercise data embedded in catalog.json (names, muscle groups, equipment,
+Italian instructions) and the animation GIFs referenced by it are derived from:
+
+    hasaneyldrm/exercises-dataset
+    https://github.com/hasaneyldrm/exercises-dataset
+    pinned commit: f987a7b858d7987c3677e1073ee18b623895f615
+
+The upstream repository states its content is for "educational and non-commercial
+research purposes only" and that the exercise media belong to their respective
+copyright holders.
+
+Honest posture: Cadenza is a single-athlete, personal, non-commercial project, and
+this integration relies on personal-use tolerance, not a clean license chain. The
+upstream "non-commercial" label is the repo author's assertion; the underlying media
+were most likely sourced from a commercial fitness library, and a redistributor
+cannot grant rights it never held. We therefore:
+
+  - embed only the textual catalog (no media in this repository);
+  - fetch GIFs at send time from the upstream's own public raw URL (we do not
+    re-host them ourselves);
+  - note that delivering a GIF through Telegram does cache it on Telegram's CDN.
+
+If Cadenza is ever used commercially, this data and the media references must be
+removed or replaced with properly licensed content.
