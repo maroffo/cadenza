@@ -32,11 +32,9 @@ type fakeTelegram struct {
 	failed    bool
 }
 
-func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{}})
-		return
-	}
+// decodeForm normalizes a Telegram Bot API request (JSON, multipart, or
+// urlencoded) into a flat string map so assertions don't care about encoding.
+func decodeForm(r *http.Request) map[string]string {
 	form := map[string]string{}
 	ct := r.Header.Get("Content-Type")
 	switch {
@@ -59,6 +57,28 @@ func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
 			form[k] = r.PostForm.Get(k)
 		}
 	}
+	return form
+}
+
+func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/sendAnimation") {
+		f.mu.Lock()
+		f.requests = append(f.requests, decodeForm(r))
+		f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"message_id": 1,
+				"animation":  map[string]any{"file_id": "CACHED123"},
+			},
+		})
+		return
+	}
+	if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{}})
+		return
+	}
+	form := decodeForm(r)
 	f.mu.Lock()
 	f.requests = append(f.requests, form)
 	parseFail := form["parse_mode"] != "" &&
@@ -228,5 +248,31 @@ func TestSend_ParseErrorOnLaterChunkFallsBack(t *testing.T) {
 	}
 	if fake.requests[1]["parse_mode"] != "" {
 		t.Error("second request should be the plain retry of chunk 1")
+	}
+}
+
+func TestSendAnimation_SendsSourceAndReturnsFileID(t *testing.T) {
+	fake := &fakeTelegram{}
+	s := newTestSender(t, fake)
+
+	fileID, err := s.SendAnimation(context.Background(), "https://example.com/squat.gif", "Squat")
+	if err != nil {
+		t.Fatalf("SendAnimation: %v", err)
+	}
+	if fileID != "CACHED123" {
+		t.Errorf("fileID = %q, want CACHED123 (so callers can cache it)", fileID)
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("requests = %d, want 1", len(fake.requests))
+	}
+	req := fake.requests[0]
+	if req["chat_id"] != "424242" {
+		t.Errorf("chat_id = %q, want 424242", req["chat_id"])
+	}
+	if req["animation"] != "https://example.com/squat.gif" {
+		t.Errorf("animation = %q, want the source string verbatim", req["animation"])
+	}
+	if req["caption"] != "Squat" {
+		t.Errorf("caption = %q, want Squat", req["caption"])
 	}
 }
