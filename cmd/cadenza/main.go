@@ -21,6 +21,7 @@ import (
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/config"
 	"github.com/maroffo/cadenza/internal/exercises"
+	"github.com/maroffo/cadenza/internal/foods"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/icuwrite"
 	"github.com/maroffo/cadenza/internal/job"
@@ -270,6 +271,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Plans:            store.NewLedger(fsClient),
 			Summary:          agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
 			Catalog:          exercises.MustLoad(),
+			Foods:            foods.MustLoad(),
 			MediaCache:       store.NewMediaCache(fsClient),
 			Animator:         sender,
 			DefaultEquipment: cfg.DefaultEquipment,

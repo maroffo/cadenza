@@ -1,0 +1,25 @@
+Food composition data
+======================
+
+The nutrient values embedded in catalog.json (energy and macronutrients per 100 g)
+are derived from:
+
+    USDA FoodData Central, SR Legacy, release 2018-04
+    https://fdc.nal.usda.gov/
+    License: CC0 1.0 Universal (Public Domain Dedication)
+    https://creativecommons.org/publicdomain/zero/1.0/
+
+USDA FDC data is released into the public domain (CC0): it may be embedded and
+redistributed freely, with attribution requested but not required.
+
+Hand-authored additions:
+  - Italian names (name_it) and synonyms are authored locally. Food NAMES are not
+    a licensed asset; the composition NUMBERS are, and those come from CC0 FDC.
+  - A few Italian staples absent from SR Legacy (bresaola, prosciutto crudo,
+    Grana Padano) and sports-nutrition products (energy gels, bars, maltodextrin,
+    isotonic drinks) are hand-entered from manufacturer nutrition labels. Label
+    figures are facts, not a copyrightable asset. Each such row carries source +
+    as_of and is refreshable: branded formulations change over time.
+
+This catalog is for general, personal, non-clinical use. It is not a substitute
+for a dietitian or, for children, a pediatrician.
