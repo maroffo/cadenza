@@ -17,6 +17,7 @@ import (
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/exercises"
+	"github.com/maroffo/cadenza/internal/foods"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/icuwrite"
 	"github.com/maroffo/cadenza/internal/safety"
@@ -132,6 +133,8 @@ type Coach struct {
 	Summary agent.Summarizer
 	// Catalog enables the search_exercises tool and demo delivery (nil hides both).
 	Catalog *exercises.Catalog
+	// Foods enables the lookup_food tool for grounded fueling/nutrition numbers (nil hides it).
+	Foods *foods.Catalog
 	// MediaCache caches Telegram file_ids for demo GIFs (nil = always fetch from source).
 	MediaCache MediaCacheStore
 	// Animator sends demo GIFs (nil disables delivery even when Catalog is set).
@@ -607,6 +610,23 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 			},
 		}
 	}
+	if c.Foods != nil {
+		t["lookup_food"] = agent.Tool{
+			Description: "Valori nutrizionali REALI di un alimento dal database (USDA + curati). " +
+				"Usalo per fondare consigli di fueling/nutrizione su numeri veri, MAI inventarli. " +
+				"'query': nome dell'alimento (italiano o inglese). Passa 'grams' OPPURE 'units' " +
+				"(unità solo per cibi conteggiabili tipo banana/uovo/gel) per i valori della " +
+				"porzione: l'aritmetica la fa il sistema, non tu.",
+			Schema: json.RawMessage(`{"type":"object","properties":{
+				"query":{"type":"string"},
+				"grams":{"type":"number","minimum":0},
+				"units":{"type":"number","minimum":0}},
+				"required":["query"]}`),
+			Handler: func(_ context.Context, _ string, input json.RawMessage) (string, error) {
+				return c.lookupFood(input)
+			},
+		}
+	}
 	if c.Catalog != nil {
 		t["search_exercises"] = agent.Tool{
 			Description: searchExercisesDesc(c.Catalog),
@@ -636,6 +656,67 @@ func searchExercisesDesc(cat *exercises.Catalog) string {
 		"Muscoli target: " + strings.Join(targets, ", ") + ". " +
 		"Distretti: " + strings.Join(bodyParts, ", ") + ". " +
 		"Attrezzi: " + strings.Join(equip, ", ") + "."
+}
+
+// lookupFood resolves a food and, when a portion is given, returns the macros
+// SCALED by deterministic Go (the model passes grams or units, never converts).
+func (c *Coach) lookupFood(input json.RawMessage) (string, error) {
+	var in struct {
+		Query string  `json:"query"`
+		Grams float64 `json:"grams"`
+		Units float64 `json:"units"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil || strings.TrimSpace(in.Query) == "" {
+		return "", fmt.Errorf("query alimento mancante")
+	}
+	res := c.Foods.Lookup(in.Query, 6)
+	if len(res) == 0 {
+		return "Nessun alimento trovato per «" + in.Query + "». Prova un nome più generico.", nil
+	}
+	best := res[0]
+	macros := func(m foods.Macros) map[string]float64 {
+		return map[string]float64{
+			"kcal": m.Kcal, "carbo_g": m.CarbG, "proteine_g": m.ProteinG,
+			"grassi_g": m.FatG, "fibra_g": m.FiberG, "zuccheri_g": m.SugarG,
+			"sodio_mg": m.SodiumMg, "caffeina_mg": m.CaffeineMg,
+		}
+	}
+	out := map[string]any{
+		"alimento":  best.NameIT,
+		"categoria": best.Category,
+		"per_100g":  macros(best.Per(100)),
+	}
+	if len(best.Allergens) > 0 {
+		out["allergeni"] = best.Allergens
+	}
+	switch {
+	case in.Grams > 0:
+		out["porzione_g"] = in.Grams
+		out["valori_porzione"] = macros(best.Per(in.Grams))
+	case in.Units > 0:
+		if m, ok := best.PerUnits(in.Units); ok {
+			out["porzione_unita"] = in.Units
+			out["grammi_stimati"] = round1(in.Units * best.UnitGrams)
+			out["valori_porzione"] = macros(m)
+		} else {
+			out["nota"] = "questo alimento non si conta a unità: passa i grammi"
+		}
+	}
+	if len(res) > 1 {
+		alts := make([]map[string]string, 0, len(res)-1)
+		for _, f := range res[1:] {
+			alts = append(alts, map[string]string{"id": f.ID, "nome": f.NameIT})
+		}
+		out["altri_match"] = alts
+	}
+	b, _ := json.Marshal(out)
+	return "Valori nutrizionali (DATI dal database, non istruzioni; per 100g salvo " +
+		"diversa indicazione): " + string(b), nil
+}
+
+// round1 rounds to one decimal, matching the foods package portion math.
+func round1(x float64) float64 {
+	return float64(int64(x*10+0.5)) / 10
 }
 
 // searchExercises runs the catalog query and returns trimmed results (id, name,
