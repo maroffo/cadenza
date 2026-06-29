@@ -20,8 +20,10 @@ func load(t *testing.T) *Catalog {
 
 func TestLoad(t *testing.T) {
 	c := load(t)
-	if got := c.Len(); got != 82 {
-		t.Errorf("Len() = %d, want 82", got)
+	// Lower bound, not exact: the curated catalog grows over time. Guards against
+	// an accidental empty/truncated embed without breaking on every addition.
+	if got := c.Len(); got < 150 {
+		t.Errorf("Len() = %d, want >= 150", got)
 	}
 	if c.srRelease == "" {
 		t.Error("srRelease is empty, want non-empty")
