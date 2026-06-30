@@ -123,6 +123,7 @@ SR_FOODS = [
     dict(id="latte_ps", match="milk lowfat fluid 1% milkfat with added vitamin a and vitamin d", avoid=["chocolate", "protein"], name_it="Latte parzialmente scremato", cat="latticini", allergens=["milk", "lactose"]),
     dict(id="yogurt_bianco", match="yogurt plain whole milk", avoid=["greek", "low", "vanilla"], name_it="Yogurt bianco intero", cat="latticini", allergens=["milk", "lactose"]),
     dict(id="yogurt_greco", fdc="171304", name_it="Yogurt greco intero", cat="latticini", allergens=["milk", "lactose"]),
+    dict(id="yogurt_greco_0", fdc="170894", name_it="Yogurt greco 0% grassi", cat="latticini", allergens=["milk", "lactose"], syn=["yogurt greco magro"]),
     dict(id="parmigiano", match="cheese parmesan grated", avoid=["cracker", "chicken", "goldfish", "grill", "imitation", "refrigerated"], name_it="Parmigiano", cat="latticini", allergens=["milk"], syn=["grana", "grana padano"]),
     dict(id="mozzarella", match="cheese mozzarella whole milk", avoid=["low", "part-skim", "string"], name_it="Mozzarella", cat="latticini", allergens=["milk", "lactose"]),
     dict(id="ricotta", match="cheese ricotta whole milk", avoid=["part skim"], name_it="Ricotta", cat="latticini", allergens=["milk", "lactose"]),
@@ -211,6 +212,18 @@ SR_FOODS = [
     dict(id="semi_chia", fdc="170554", name_it="Semi di chia", cat="grassi", allergens=[]),
     # --- bevande ---
     dict(id="caffe", fdc="171890", name_it="Caffè (filtro)", cat="bevande", allergens=[]),
+
+    # --- aggiunte guidate dalle ricette ---
+    dict(id="riso_integrale_crudo", fdc="169703", name_it="Riso integrale (crudo)", cat="cereali", allergens=[]),
+    dict(id="tonno_olio", fdc="173708", name_it="Tonno sott'olio (sgocciolato)", cat="proteine", allergens=["fish"]),
+    dict(id="mozzarella_delattosata", fdc="170845", name_it="Mozzarella delattosata", cat="latticini", allergens=["milk"], syn=["mozzarella senza lattosio"]),
+    dict(id="olive_nere", fdc="169094", name_it="Olive nere", cat="grassi", allergens=[]),
+    dict(id="mais_scatola", fdc="169214", name_it="Mais in scatola (sgocciolato)", cat="verdura", allergens=[]),
+    dict(id="capperi", fdc="172238", name_it="Capperi (sott'aceto)", cat="condimenti", allergens=[]),
+    dict(id="maionese", fdc="171009", name_it="Maionese", cat="condimenti", allergens=["egg"]),
+    dict(id="tempeh", fdc="172467", name_it="Tempeh (cotto)", cat="proteine", allergens=["soy"]),
+    dict(id="fagioli_cannellini", fdc="175204", name_it="Fagioli cannellini in scatola", cat="proteine", allergens=[], syn=["cannellini"]),
+    dict(id="albicocche", fdc="171697", name_it="Albicocche (fresche)", cat="frutta", allergens=[], unit_g=35),
 ]
 
 # Foods absent from SR Legacy or better entered by hand. Nutrients given PER 100 g

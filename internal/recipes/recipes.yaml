@@ -1,0 +1,153 @@
+# ABOUTME: Working draft of the family recipe book; schema co-designed from real recipes.
+# ABOUTME: Macros/allergens are DERIVED from internal/foods at build time, never stored here.
+#
+# Schema (draft v1, will evolve as recipes stress it):
+#   id        kebab-case stable id
+#   nome      display name
+#   categoria colazione|primo|secondo|contorno|piatto-unico|merenda|dolce
+#   porzioni  how many servings the quantities below make
+#   tag       optional free tags (es. veloce, piace-ai-bimbi, senza-lattosio)
+#   stagioni  list of: primavera|estate|autunno|inverno (omesso = tutto l'anno).
+#             SOFT: l'assistente preferisce le ricette di stagione, non esclude le altre.
+#             Stagione corrente dalla data: inverno dic-feb, primavera mar-mag,
+#             estate giu-ago, autunno set-nov.
+#   ingredienti: list of {food (foods-catalog id), qta, unita (g|ml|pz|cucchiaio|cucchiaino|spicchio|qb)}
+#   passi     optional list of steps
+#   fonte     where it comes from
+
+# Pasto (meal) = composizione di N ricette + M cibi diretti:
+#   tipo     colazione|pranzo|cena|spuntino
+#   ricette  list of {ricetta: <id>, porzioni: N}  (quante porzioni di quella ricetta)
+#   cibi     list of {food: <id>, qta, unita}      (cibi non parte di una ricetta)
+#   Macro/allergeni del pasto = somma dei componenti. Per un pasto di famiglia la
+#   ripartizione 53/47 si applica al totale.
+#
+# Measures table: how non-gram units resolve to grams. Code applies a per-food
+# override when present, else the default. qb (q.b.) contributes 0 to the macros
+# and is flagged (salt/pepper/spices: negligible macros anyway).
+misure:
+  cucchiaio:
+    default_g: 15
+    per_food:
+      olio_oliva: 10      # 1 cucchiaio d'olio ~ 10 g (~90 kcal), convenzione IT
+      miele: 20
+      maionese: 13
+  cucchiaino:
+    default_g: 5
+  spicchio:
+    default_g: 3          # 1 spicchio d'aglio
+  pz:
+    note: "usa unit_grams dell'alimento (banana 118g, uovo 50g, ...)"
+  qb:
+    default_g: 0          # ignorato nei macro, segnalato
+
+ricette:
+  - id: colazione-avena-chia-yogurt
+    nome: "Avena, chia e yogurt greco"
+    categoria: colazione
+    porzioni: 1
+    tag: [veloce, proteica]
+    ingredienti:
+      - food: avena
+        qta: 30
+        unita: g
+      - food: semi_chia
+        qta: 20
+        unita: g
+      - food: yogurt_greco_0
+        qta: 200
+        unita: g
+    fonte: famiglia
+
+  - id: insalata-riso
+    nome: "Insalata di riso"
+    categoria: piatto-unico
+    porzioni: 4
+    tag: [senza-lattosio]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: riso_integrale_crudo   # 250g = peso a CRUDO (da confermare)
+        qta: 250
+        unita: g
+      - food: tonno_olio
+        qta: 56
+        unita: g
+      - food: mozzarella_delattosata
+        qta: 100
+        unita: g
+      - food: mais_scatola
+        qta: 140
+        unita: g
+      - food: pomodoro
+        qta: 200
+        unita: g
+      - food: olive_nere
+        qta: 20
+        unita: g
+      - food: maionese
+        qta: 20
+        unita: g
+      - food: capperi
+        qta: 20
+        unita: g
+      - food: olio_oliva
+        qta: 10
+        unita: g
+    fonte: famiglia
+
+  - id: pasta-zucchine-tempeh
+    nome: "Pasta zucchine e tempeh"
+    categoria: primo
+    porzioni: 4              # da confermare
+    tag: [vegano, veloce]
+    stagioni: [primavera, estate]   # le zucchine sono estive
+    ingredienti:
+      - food: pasta_secca
+        qta: 333
+        unita: g
+      - food: zucchina
+        qta: 400
+        unita: g
+      - food: tempeh
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio     # -> 10 g via tabella misure
+    fonte: famiglia
+
+  - id: tonno-fagioli
+    nome: "Tonno e fagioli"
+    categoria: piatto-unico
+    porzioni: 4              # da confermare
+    ingredienti:
+      - food: fagioli_cannellini
+        qta: 720
+        unita: g
+      - food: tonno_olio
+        qta: 112
+        unita: g
+      - food: tonno_scatola
+        qta: 56
+        unita: g
+      - food: olio_oliva
+        qta: 20
+        unita: g
+    fonte: famiglia
+
+# --- Pasti (composizioni: ricette + cibi) ---
+pasti:
+  - id: pranzo-tonno-fagioli
+    nome: "Pranzo: tonno e fagioli, pomodori, albicocche"
+    tipo: pranzo
+    ricette:
+      - ricetta: tonno-fagioli
+        porzioni: 4          # tutto il piatto va nel pasto di famiglia
+    cibi:
+      - food: pomodoro
+        qta: 1000
+        unita: g
+      - food: albicocche
+        qta: 200
+        unita: g
+    fonte: famiglia
