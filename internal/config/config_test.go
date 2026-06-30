@@ -180,3 +180,35 @@ func TestLoad_BadRateRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeAllergens(t *testing.T) {
+	eq := func(got, want []string) bool {
+		if len(got) != len(want) {
+			return false
+		}
+		for i := range got {
+			if got[i] != want[i] {
+				return false
+			}
+		}
+		return true
+	}
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"nil keeps lactose baseline", nil, []string{"lactose"}},
+		{"italian lattosio canonicalizes", []string{"lattosio"}, []string{"lactose"}},
+		{"italian synonyms + baseline, sorted", []string{"glutine", "Soia"}, []string{"gluten", "lactose", "soy"}},
+		{"unknown token kept, baseline still present", []string{"sconosciuto"}, []string{"lactose", "sconosciuto"}},
+		{"lactose cannot be dropped", []string{"gluten"}, []string{"gluten", "lactose"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeAllergens(c.in); !eq(got, c.want) {
+				t.Errorf("normalizeAllergens(%v) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}

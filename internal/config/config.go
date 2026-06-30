@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,11 @@ type Config struct {
 	// to the coach so it need not be restated every conversation. Empty = full
 	// kit assumed. Per-day conversational overrides still take precedence.
 	DefaultEquipment []string
+
+	// MealExcludeAllergens are the family's HARD allergen exclusions for meal
+	// suggestions (e.g. "lactose"): the assistant never proposes a recipe whose
+	// ingredients carry one. Defaults to ["lactose"]; override via env.
+	MealExcludeAllergens []string
 }
 
 // Load reads configuration via getenv (os.Getenv in main, a map in tests).
@@ -87,6 +93,7 @@ func Load(getenv func(string) string) (*Config, error) {
 	cfg.ModelDeep = orDefault(getenv("MODEL_DEEP"), "claude-opus-4-8")
 	cfg.WebSessionSecret = getenv("WEB_SESSION_SECRET")
 	cfg.DefaultEquipment = splitCSV(getenv("CADENZA_DEFAULT_EQUIPMENT"))
+	cfg.MealExcludeAllergens = normalizeAllergens(splitCSV(getenv("CADENZA_MEAL_EXCLUDE_ALLERGENS")))
 
 	if cfg.Env != "dev" && cfg.Env != "prod" {
 		return nil, fmt.Errorf("ENV must be dev or prod, got %q", cfg.Env)
@@ -137,5 +144,46 @@ func splitCSV(raw string) []string {
 	if len(out) == 0 {
 		return nil
 	}
+	return out
+}
+
+// allergenSynonyms maps Italian (and English) allergen terms to the foods
+// catalog's canonical English tokens, so the family's exclusions can be
+// configured in Italian without silently matching nothing.
+var allergenSynonyms = map[string]string{
+	"lattosio": "lactose", "lactose": "lactose",
+	"latte": "milk", "latticini": "milk", "milk": "milk",
+	"glutine": "gluten", "gluten": "gluten",
+	"uova": "egg", "uovo": "egg", "egg": "egg",
+	"pesce": "fish", "fish": "fish",
+	"crostacei": "shellfish", "molluschi": "shellfish", "shellfish": "shellfish",
+	"frutta a guscio": "nuts", "noci": "nuts", "nuts": "nuts",
+	"arachidi": "peanuts", "peanuts": "peanuts",
+	"soia": "soy", "soy": "soy",
+	"sesamo": "sesame", "sesame": "sesame",
+}
+
+// normalizeAllergens canonicalizes configured exclusion terms to the catalog's
+// English vocabulary and guarantees lactose stays excluded (the documented
+// family baseline), so an Italian term or a typo can never silently disable the
+// lactose filter. Unknown tokens are kept lowercased (harmless if unmatched).
+func normalizeAllergens(raw []string) []string {
+	set := map[string]bool{"lactose": true}
+	for _, t := range raw {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if t == "" {
+			continue
+		}
+		if canon, ok := allergenSynonyms[t]; ok {
+			set[canon] = true
+		} else {
+			set[t] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
