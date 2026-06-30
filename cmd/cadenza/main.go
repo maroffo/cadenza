@@ -25,6 +25,7 @@ import (
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/icuwrite"
 	"github.com/maroffo/cadenza/internal/job"
+	"github.com/maroffo/cadenza/internal/recipes"
 	"github.com/maroffo/cadenza/internal/server"
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
@@ -251,32 +252,35 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		morning.ModelName = cfg.ModelCheap
 
 		chats := store.NewChats(fsClient)
+		foodsCat := foods.MustLoad()
 		message.Coach = &job.Coach{
-			Agent:            agent.Coach{Client: llm, Model: cfg.ModelDeep},
-			Wellness:         job.ICU{C: icuClient},
-			Activities:       job.ICU{C: icuClient},
-			Profiles:         store.NewProfiles(fsClient),
-			Rules:            store.NewRules(fsClient),
-			RuleCount:        store.NewRules(fsClient),
-			Muts:             store.NewMutations(fsClient),
-			Budget:           store.NewBudget(fsClient),
-			Sessions:         store.NewSessions(fsClient),
-			Chats:            chats,
-			Status:           morning,
-			Out:              sender,
-			Confirm:          sender,
-			Writer:           &icuwrite.Writer{C: icuClient},
-			Ledger:           store.NewLedger(fsClient),
-			Events:           job.ICU{C: icuClient},
-			Plans:            store.NewLedger(fsClient),
-			Summary:          agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
-			Catalog:          exercises.MustLoad(),
-			Foods:            foods.MustLoad(),
-			MediaCache:       store.NewMediaCache(fsClient),
-			Animator:         sender,
-			DefaultEquipment: cfg.DefaultEquipment,
-			Now:              time.Now,
-			TZ:               tz,
+			Agent:                agent.Coach{Client: llm, Model: cfg.ModelDeep},
+			Wellness:             job.ICU{C: icuClient},
+			Activities:           job.ICU{C: icuClient},
+			Profiles:             store.NewProfiles(fsClient),
+			Rules:                store.NewRules(fsClient),
+			RuleCount:            store.NewRules(fsClient),
+			Muts:                 store.NewMutations(fsClient),
+			Budget:               store.NewBudget(fsClient),
+			Sessions:             store.NewSessions(fsClient),
+			Chats:                chats,
+			Status:               morning,
+			Out:                  sender,
+			Confirm:              sender,
+			Writer:               &icuwrite.Writer{C: icuClient},
+			Ledger:               store.NewLedger(fsClient),
+			Events:               job.ICU{C: icuClient},
+			Plans:                store.NewLedger(fsClient),
+			Summary:              agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
+			Catalog:              exercises.MustLoad(),
+			Foods:                foodsCat,
+			Recipes:              recipes.MustLoad(foodsCat),
+			MealExcludeAllergens: cfg.MealExcludeAllergens,
+			MediaCache:           store.NewMediaCache(fsClient),
+			Animator:             sender,
+			DefaultEquipment:     cfg.DefaultEquipment,
+			Now:                  time.Now,
+			TZ:                   tz,
 		}
 		message.Coach.Injuries = injuries
 		message.Coach.InjurySched = injuryJob
