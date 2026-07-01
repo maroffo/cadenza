@@ -224,6 +224,16 @@ SR_FOODS = [
     dict(id="tempeh", fdc="172467", name_it="Tempeh (cotto)", cat="proteine", allergens=["soy"]),
     dict(id="fagioli_cannellini", fdc="175204", name_it="Fagioli cannellini in scatola", cat="proteine", allergens=[], syn=["cannellini"]),
     dict(id="albicocche", fdc="171697", name_it="Albicocche (fresche)", cat="frutta", allergens=[], unit_g=35),
+    # lactose-free cheese variants (family buys these; tagged milk-only so recipes pass the lactose filter)
+    dict(id="erborinato_delattosato", fdc="172175", name_it="Erborinato senza lattosio (blu di pecora)", cat="latticini", allergens=["milk"], syn=["gorgonzola senza lattosio", "formaggio blu", "brebiblue", "ovinfort"]),
+    dict(id="pepe_nero", fdc="170931", name_it="Pepe nero", cat="condimenti", allergens=[]),
+    dict(id="sale", fdc="173468", name_it="Sale", cat="condimenti", allergens=[]),
+    dict(id="feta_delattosata", fdc="173420", name_it="Feta senza lattosio", cat="latticini", allergens=["milk"], syn=["feta di pecora"]),
+    dict(id="menta", fdc="173475", name_it="Menta fresca", cat="condimenti", allergens=[]),
+    dict(id="farro_crudo", fdc="169745", name_it="Farro/spelta (crudo)", cat="cereali", allergens=["gluten"]),
+    dict(id="basilico", fdc="172232", name_it="Basilico fresco", cat="condimenti", allergens=[]),
+    dict(id="prezzemolo", fdc="170416", name_it="Prezzemolo fresco", cat="condimenti", allergens=[]),
+    dict(id="robiola_delattosata", fdc="173418", name_it="Robiola senza lattosio", cat="latticini", allergens=["milk"], syn=["crescenza senza lattosio"]),
 ]
 
 # Foods absent from SR Legacy or better entered by hand. Nutrients given PER 100 g
@@ -278,6 +288,12 @@ MANUAL_FOODS = [
     dict(id="cioccolato_fondente", name_it="Cioccolato fondente (70-85%)", name_en="Dark chocolate 70-85%", cat="dolcificanti", allergens=[],
          per100=dict(kcal=598, protein_g=7.8, fat_g=42.6, carb_g=45.9, fiber_g=10.9, sugar_g=24.0, sodium_mg=20, caffeine_mg=80),
          source="USDA FDC (generic)", as_of="2026-06"),
+    dict(id="gnocchi", name_it="Gnocchi di patate", name_en="Potato gnocchi", cat="cereali", allergens=["gluten"],
+         per100=dict(kcal=133, protein_g=3.3, fat_g=0.6, carb_g=28.0, fiber_g=1.4, sugar_g=0.5, sodium_mg=300, caffeine_mg=0),
+         source="etichetta", as_of="2026-06"),
+    dict(id="pesto", name_it="Pesto alla genovese", name_en="Pesto (basil)", cat="condimenti", allergens=["milk", "nuts"],
+         per100=dict(kcal=450, protein_g=5.0, fat_g=46.0, carb_g=6.0, fiber_g=2.0, sugar_g=1.5, sodium_mg=800, caffeine_mg=0),
+         source="etichetta", as_of="2026-06", syn=["pesto genovese"]),
     dict(id="passata", name_it="Passata di pomodoro", name_en="Tomato puree/passata", cat="condimenti", allergens=[],
          per100=dict(kcal=38, protein_g=1.6, fat_g=0.2, carb_g=8.6, fiber_g=1.9, sugar_g=5.0, sodium_mg=18, caffeine_mg=0),
          source="etichetta/INRAN", as_of="2026-06"),
@@ -372,9 +388,12 @@ def main():
     for spec in SR_FOODS:
         fid, desc = pick(foods, spec)
         row = row_from_sr(spec, fid, desc, nutrients)
-        # Energy must be present, or the row is useless for fueling math.
-        if row["kcal"] == 0 and row["carb_g"] == 0 and row["protein_g"] == 0:
-            raise SystemExit(f"{spec['id']}: no macros for fdc {fid} ({desc})")
+        # Reject a row with NO data at all (parse/selection error). Zero-energy
+        # seasonings like salt are legitimate (they carry only sodium), so the
+        # guard also looks at fat and sodium before failing.
+        if (row["kcal"] == 0 and row["carb_g"] == 0 and row["protein_g"] == 0
+                and row["fat_g"] == 0 and row["sodium_mg"] == 0):
+            raise SystemExit(f"{spec['id']}: no data at all for fdc {fid} ({desc})")
         # Sugar is structurally present for fruit and sweeteners; a zero there
         # means SR left the field empty and num() silently zero-filled it (the
         # "Raisins, seeded" trap). Fail loudly so we pick a populated row.

@@ -46,11 +46,17 @@ func contains(xs []string, s string) bool {
 
 func TestLoad(t *testing.T) {
 	b := book(t)
-	if got := len(b.Recipes()); got != 4 {
-		t.Errorf("len(Recipes()) = %d, want 4", got)
+	// Lower bound, not exact: the recipe book grows over time. Load() also
+	// validates every ingredient resolves, so a successful load already proves
+	// referential integrity.
+	if got := len(b.Recipes()); got < 4 {
+		t.Errorf("len(Recipes()) = %d, want >= 4", got)
 	}
-	if got := len(b.Meals()); got != 1 {
-		t.Errorf("len(Meals()) = %d, want 1", got)
+	if _, ok := b.ByID("insalata-riso"); !ok {
+		t.Error("expected known recipe insalata-riso to be present")
+	}
+	if got := len(b.Meals()); got < 1 {
+		t.Errorf("len(Meals()) = %d, want >= 1", got)
 	}
 }
 
@@ -225,9 +231,13 @@ func TestSuggestSeasonSoftRanking(t *testing.T) {
 
 func TestSuggestLimit(t *testing.T) {
 	b := book(t)
-	// Default limit is 6; only 4 recipes exist, so all 4 come back.
-	if got := len(b.Suggest(SuggestFilter{})); got != 4 {
-		t.Errorf("default Suggest returned %d recipes, want 4", got)
+	// Default limit is 6: with fewer recipes than that, all come back; capped at 6.
+	wantDefault := len(b.Recipes())
+	if wantDefault > defaultSuggestLimit {
+		wantDefault = defaultSuggestLimit
+	}
+	if got := len(b.Suggest(SuggestFilter{})); got != wantDefault {
+		t.Errorf("default Suggest returned %d recipes, want %d", got, wantDefault)
 	}
 	if got := len(b.Suggest(SuggestFilter{Limit: 2})); got != 2 {
 		t.Errorf("Suggest with Limit 2 returned %d recipes, want 2", got)
@@ -237,9 +247,11 @@ func TestSuggestLimit(t *testing.T) {
 func TestSuggestCategoria(t *testing.T) {
 	b := book(t)
 	out := b.Suggest(SuggestFilter{Categoria: "piatto-unico"})
-	if len(out) != 2 {
-		t.Fatalf("Suggest categoria piatto-unico returned %d, want 2: %v", len(out), ids(out))
+	if len(out) == 0 {
+		t.Fatal("Suggest categoria piatto-unico returned nothing")
 	}
+	// The invariant is the filter, not an exact count (the book grows): every
+	// returned recipe must be of the requested categoria.
 	for _, r := range out {
 		if r.Categoria != "piatto-unico" {
 			t.Errorf("recipe %q categoria = %q, want piatto-unico", r.ID, r.Categoria)

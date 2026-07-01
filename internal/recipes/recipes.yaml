@@ -135,6 +135,432 @@ ricette:
         unita: g
     fonte: famiglia
 
+  - id: pasta-erborinato
+    nome: "Pasta all'erborinato"
+    categoria: primo
+    porzioni: 4
+    tag: [veloce]
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: erborinato_delattosato
+        qta: 120
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio     # un goccio per mantecare
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: insalata-feta-ceci
+    nome: "Insalata di feta, ceci, peperoni, zucchine, pomodorini"
+    categoria: piatto-unico
+    porzioni: 4
+    tag: [estiva, freddo]
+    stagioni: [estate]
+    ingredienti:
+      - food: ceci
+        qta: 480          # due scatole, peso sgocciolato
+        unita: g
+      - food: feta_delattosata
+        qta: 150
+        unita: g
+      - food: peperone
+        qta: 200
+        unita: g
+      - food: zucchina
+        qta: 200
+        unita: g
+      - food: pomodoro
+        qta: 250
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: limone
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: insalata-feta-melone-anguria
+    nome: "Insalata di feta, melone e anguria"
+    categoria: contorno
+    porzioni: 4
+    tag: [estiva, freddo, veloce]
+    stagioni: [estate]
+    ingredienti:
+      - food: anguria
+        qta: 500
+        unita: g
+      - food: melone
+        qta: 400
+        unita: g
+      - food: feta_delattosata
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: menta
+        qta: 1
+        unita: qb
+      - food: limone
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: farro-pesche-erborinato
+    nome: "Farro con pesche ed erborinato"
+    categoria: piatto-unico
+    porzioni: 4
+    tag: [estiva, freddo]
+    stagioni: [estate]
+    ingredienti:
+      - food: farro_crudo
+        qta: 240          # peso a secco
+        unita: g
+      - food: rucola
+        qta: 80
+        unita: g
+      - food: pesca
+        qta: 250
+        unita: g
+      - food: erborinato_delattosato
+        qta: 100
+        unita: g
+      - food: noci
+        qta: 40
+        unita: g
+      - food: miele
+        qta: 1
+        unita: cucchiaio
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: limone
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: insalata-pasta
+    nome: "Insalata di pasta"
+    categoria: piatto-unico
+    porzioni: 4
+    tag: [estiva, freddo]
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: pomodoro
+        qta: 350
+        unita: g
+      - food: mozzarella_delattosata
+        qta: 200
+        unita: g
+      - food: olive_nere
+        qta: 80
+        unita: g
+      - food: basilico
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-zucchine-salmone
+    nome: "Pasta zucchine e salmone"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: zucchina
+        qta: 400
+        unita: g
+      - food: salmone
+        qta: 180
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-zucchine
+    nome: "Pasta alle zucchine"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: zucchina
+        qta: 500
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: parmigiano
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: basilico
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-zucchine-robiola
+    nome: "Pasta zucchine e robiola"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: zucchina
+        qta: 400
+        unita: g
+      - food: robiola_delattosata
+        qta: 150
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: melanzane-funghetto
+    nome: "Melanzane a funghetto"
+    categoria: contorno
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [estate]
+    ingredienti:
+      - food: melanzana
+        qta: 600
+        unita: g
+      - food: passata
+        qta: 200
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: basilico
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: zucchine-umido
+    nome: "Zucchine in umido"
+    categoria: contorno
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: zucchina
+        qta: 600
+        unita: g
+      - food: passata
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 100
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: frittata-piselli-zucchine
+    nome: "Frittata piselli e zucchine"
+    categoria: secondo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: uovo
+        qta: 6
+        unita: pz
+      - food: piselli
+        qta: 150
+        unita: g
+      - food: zucchina
+        qta: 200
+        unita: g
+      - food: parmigiano
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-flavio
+    nome: "Pasta Flavio (tonno e capperi)"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: tonno_olio
+        qta: 112
+        unita: g
+      - food: capperi
+        qta: 20
+        unita: g
+      - food: passata
+        qta: 200
+        unita: g
+      - food: olive_nere
+        qta: 40
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: couscous-uvetta-mandorle
+    nome: "Cous cous uvetta, limone e mandorle"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: couscous_cotto
+        qta: 400
+        unita: g
+      - food: uvetta
+        qta: 40
+        unita: g
+      - food: mandorle
+        qta: 40
+        unita: g
+      - food: limone
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: menta
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: gnocchi-pesto
+    nome: "Gnocchi al pesto"
+    categoria: primo
+    porzioni: 4
+    tag: [estiva]
+    stagioni: [estate]
+    ingredienti:
+      - food: gnocchi
+        qta: 500
+        unita: g
+      - food: pesto
+        qta: 80
+        unita: g
+      - food: parmigiano
+        qta: 20
+        unita: g
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
 # --- Pasti (composizioni: ricette + cibi) ---
 pasti:
   - id: pranzo-tonno-fagioli
