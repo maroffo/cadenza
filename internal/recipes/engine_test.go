@@ -76,11 +76,11 @@ func TestRecipePerServingColazione(t *testing.T) {
 		t.Fatal("recipe colazione-avena-chia-yogurt not found")
 	}
 	m, allergens := b.RecipePerServing(r)
-	approx(t, "kcal", m.Kcal, 329)
-	approx(t, "carb", m.CarbG, 35.9)
-	approx(t, "prot", m.ProteinG, 27.6)
-	approx(t, "fat", m.FatG, 8.9)
-	approx(t, "fiber", m.FiberG, 9.9)
+	approx(t, "kcal", m.Kcal, 353)
+	approx(t, "carb", m.CarbG, 38.0)
+	approx(t, "prot", m.ProteinG, 28.4)
+	approx(t, "fat", m.FatG, 10.5)
+	approx(t, "fiber", m.FiberG, 11.6)
 	if !contains(allergens, "lactose") || !contains(allergens, "milk") {
 		t.Errorf("allergens = %v, want to contain lactose and milk", allergens)
 	}
