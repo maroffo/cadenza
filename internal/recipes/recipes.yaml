@@ -561,6 +561,3058 @@ ricette:
         unita: qb
     fonte: famiglia
 
+  - id: pasta-broccoli
+    nome: "Pasta ai broccoli"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: broccoli
+        qta: 700
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: acciughe
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: pecorino
+        qta: 40
+        unita: g
+      - food: pangrattato
+        qta: 30
+        unita: g
+      - food: peperoncino
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-ragu
+    nome: "Pasta al ragù"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: manzo_macinato
+        qta: 400
+        unita: g
+      - food: pancetta
+        qta: 60
+        unita: g
+      - food: passata
+        qta: 400
+        unita: g
+      - food: concentrato_pomodoro
+        qta: 20
+        unita: g
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 60
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: vino_rosso
+        qta: 100
+        unita: ml
+      - food: latte_delattosato
+        qta: 100
+        unita: ml
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-salmone
+    nome: "Pasta al salmone"
+    categoria: primo
+    porzioni: 4
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: salmone_affumicato
+        qta: 200
+        unita: g
+      - food: panna_delattosata
+        qta: 200
+        unita: ml
+      - food: cipolla
+        qta: 0.5
+        unita: pz
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-ceci
+    nome: "Pasta e ceci"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: ceci
+        qta: 480
+        unita: g
+      - food: pasta_secca
+        qta: 240
+        unita: g
+      - food: passata
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 50
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-fagioli
+    nome: "Pasta e fagioli"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: fagioli_borlotti
+        qta: 400
+        unita: g
+      - food: pasta_secca
+        qta: 300
+        unita: g
+      - food: passata
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 60
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: pancetta
+        qta: 80
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-lenticchie
+    nome: "Pasta e lenticchie"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: lenticchie
+        qta: 500
+        unita: g
+      - food: pasta_secca
+        qta: 280
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 80
+        unita: g
+      - food: sedano
+        qta: 60
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: passata
+        qta: 200
+        unita: g
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: spaghetti-cinesi
+    nome: "Spaghetti cinesi (saltati con verdure e salsa di soia)"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: spaghetti_cinesi
+        qta: 300
+        unita: g
+      - food: salsa_soia
+        qta: 4
+        unita: cucchiaio
+      - food: germogli_soia
+        qta: 150
+        unita: g
+      - food: carota
+        qta: 150
+        unita: g
+      - food: peperone
+        qta: 150
+        unita: g
+      - food: zucchina
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: zenzero
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-funghi
+    nome: "Pasta ai funghi"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: funghi
+        qta: 400
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-zucca-finferli
+    nome: "Pasta zucca e finferli"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: zucca
+        qta: 500
+        unita: g
+      - food: funghi
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 0.5
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: burro
+        qta: 20
+        unita: g
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-zucca-cavolo-nero
+    nome: "Pasta zucca e cavolo nero"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: zucca
+        qta: 500
+        unita: g
+      - food: cavolo_nero
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-carbonara
+    nome: "Pasta alla carbonara"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 400
+        unita: g
+      - food: guanciale
+        qta: 200
+        unita: g
+      - food: uovo
+        qta: 7
+        unita: pz
+      - food: pecorino
+        qta: 100
+        unita: g
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: gnocchetti-campidanese
+    nome: "Gnocchetti alla Campidanese"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: salsiccia
+        qta: 300
+        unita: g
+      - food: passata
+        qta: 400
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: pecorino
+        qta: 60
+        unita: g
+      - food: zafferano
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: gramigna-ragu-rosso
+    nome: "Gramigna al ragù rosso"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: salsiccia
+        qta: 400
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: passata
+        qta: 300
+        unita: g
+      - food: latte_delattosato
+        qta: 20
+        unita: ml
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: gramigna-salsiccia
+    nome: "Gramigna alla salsiccia (panna e salsiccia)"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: salsiccia
+        qta: 350
+        unita: g
+      - food: panna_delattosata
+        qta: 200
+        unita: ml
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: gnocchi-gorgonzola
+    nome: "Gnocchi al gorgonzola"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: gnocchi
+        qta: 700
+        unita: g
+      - food: erborinato_delattosato
+        qta: 200
+        unita: g
+      - food: latte_delattosato
+        qta: 120
+        unita: ml
+      - food: burro
+        qta: 20
+        unita: g
+      - food: parmigiano
+        qta: 30
+        unita: g
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: gnocchi-burro-salvia
+    nome: "Gnocchi burro e salvia"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: gnocchi
+        qta: 800
+        unita: g
+      - food: burro
+        qta: 80
+        unita: g
+      - food: salvia
+        qta: 0
+        unita: qb
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: fregola-frutti-mare
+    nome: "Fregola ai frutti di mare"
+    categoria: primo
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 300
+        unita: g
+      - food: cozze
+        qta: 500
+        unita: g
+      - food: vongole
+        qta: 400
+        unita: g
+      - food: calamari
+        qta: 200
+        unita: g
+      - food: gamberetti
+        qta: 200
+        unita: g
+      - food: passata
+        qta: 200
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: limone
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: fregola-salsiccia
+    nome: "Fregola alla salsiccia"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 300
+        unita: g
+      - food: salsiccia
+        qta: 350
+        unita: g
+      - food: passata
+        qta: 250
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: pecorino
+        qta: 40
+        unita: g
+      - food: zafferano
+        qta: 1
+        unita: qb
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: lasagne
+    nome: "Lasagne alla bolognese"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: lasagne
+        qta: 250
+        unita: g
+      - food: manzo_macinato
+        qta: 350
+        unita: g
+      - food: pancetta
+        qta: 80
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 50
+        unita: g
+      - food: passata
+        qta: 400
+        unita: g
+      - food: vino_rosso
+        qta: 100
+        unita: ml
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: burro
+        qta: 50
+        unita: g
+      - food: farina_00
+        qta: 50
+        unita: g
+      - food: latte_delattosato
+        qta: 600
+        unita: ml
+      - food: parmigiano
+        qta: 80
+        unita: g
+      - food: noce_moscata
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-forno-ragu-piselli
+    nome: "Pasta al forno ragù e piselli"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: pasta_secca
+        qta: 350
+        unita: g
+      - food: manzo_macinato
+        qta: 300
+        unita: g
+      - food: passata
+        qta: 400
+        unita: g
+      - food: piselli
+        qta: 200
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: mozzarella_delattosata
+        qta: 200
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: basilico
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-cavolonero-cannellini
+    nome: "Pasta cavolo nero e cannellini"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: cavolo_nero
+        qta: 250
+        unita: g
+      - food: fagioli_cannellini
+        qta: 250
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 4
+        unita: cucchiaio
+      - food: pecorino
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-frutti-mare
+    nome: "Pasta ai frutti di mare"
+    categoria: primo
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 350
+        unita: g
+      - food: cozze
+        qta: 500
+        unita: g
+      - food: vongole
+        qta: 500
+        unita: g
+      - food: gamberetti
+        qta: 200
+        unita: g
+      - food: calamari
+        qta: 250
+        unita: g
+      - food: pomodoro
+        qta: 300
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: peperoncino
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: tagliatelle-funghi
+    nome: "Tagliatelle ai funghi"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno]
+    ingredienti:
+      - food: tagliatelle_uovo
+        qta: 320
+        unita: g
+      - food: funghi
+        qta: 350
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: burro
+        qta: 20
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: pasta-carlofortina
+    nome: "Pasta carlofortina (tonno fresco, pomodoro, basilico, pinoli)"
+    categoria: primo
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: pasta_secca
+        qta: 320
+        unita: g
+      - food: tonno_fresco
+        qta: 280
+        unita: g
+      - food: pomodoro
+        qta: 350
+        unita: g
+      - food: pinoli
+        qta: 40
+        unita: g
+      - food: parmigiano
+        qta: 25
+        unita: g
+      - food: pecorino
+        qta: 25
+        unita: g
+      - food: olio_oliva
+        qta: 6
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: couscous-freddo-verdure
+    nome: "Cous cous freddo alle verdure"
+    categoria: primo
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: couscous_secco
+        qta: 250
+        unita: g
+      - food: zucchina
+        qta: 200
+        unita: g
+      - food: peperone
+        qta: 150
+        unita: g
+      - food: pomodoro
+        qta: 200
+        unita: g
+      - food: melanzana
+        qta: 150
+        unita: g
+      - food: carota
+        qta: 80
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: olive_nere
+        qta: 50
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: menta
+        qta: 0
+        unita: qb
+      - food: limone
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: couscous-seppie-piselli
+    nome: "Cous cous con seppie e piselli"
+    categoria: primo
+    porzioni: 4
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: seppie
+        qta: 600
+        unita: g
+      - food: couscous_cotto
+        qta: 800
+        unita: g
+      - food: piselli
+        qta: 250
+        unita: g
+      - food: passata
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 1
+        unita: pz
+      - food: vino_bianco
+        qta: 60
+        unita: ml
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: couscous-caldo-verdure
+    nome: "Cous cous caldo alle verdure"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: couscous_secco
+        qta: 280
+        unita: g
+      - food: zucchina
+        qta: 250
+        unita: g
+      - food: zucca
+        qta: 250
+        unita: g
+      - food: peperone
+        qta: 200
+        unita: g
+      - food: carota
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: ceci
+        qta: 240
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-giallo
+    nome: "Risotto giallo allo zafferano (alla milanese)"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: cipolla
+        qta: 0.5
+        unita: pz
+      - food: burro
+        qta: 50
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: zafferano
+        qta: 1
+        unita: qb
+      - food: vino_bianco
+        qta: 60
+        unita: ml
+      - food: brodo_vegetale
+        qta: 1000
+        unita: ml
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-pere-formaggio
+    nome: "Risotto pere e formaggio"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: pera
+        qta: 300
+        unita: g
+      - food: erborinato_delattosato
+        qta: 120
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: burro
+        qta: 40
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: noci
+        qta: 40
+        unita: g
+      - food: vino_bianco
+        qta: 50
+        unita: ml
+      - food: brodo_vegetale
+        qta: 900
+        unita: ml
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-zucca
+    nome: "Risotto alla zucca"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno]
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: zucca
+        qta: 500
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: burro
+        qta: 30
+        unita: g
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 60
+        unita: ml
+      - food: brodo_vegetale
+        qta: 1000
+        unita: ml
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-cantonese
+    nome: "Riso alla cantonese"
+    categoria: primo
+    porzioni: 4
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 300
+        unita: g
+      - food: uovo
+        qta: 3
+        unita: pz
+      - food: prosciutto_cotto
+        qta: 150
+        unita: g
+      - food: piselli
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: salsa_soia
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-funghi
+    nome: "Risotto ai funghi"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno]
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: funghi
+        qta: 400
+        unita: g
+      - food: funghi_porcini_secchi
+        qta: 20
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: vino_bianco
+        qta: 80
+        unita: ml
+      - food: brodo_vegetale
+        qta: 1000
+        unita: ml
+      - food: burro
+        qta: 40
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-vino
+    nome: "Risotto al vino rosso"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: vino_rosso
+        qta: 250
+        unita: ml
+      - food: brodo_vegetale
+        qta: 1000
+        unita: ml
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: burro
+        qta: 40
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: riso-radicchio
+    nome: "Risotto al radicchio"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: riso_bianco_crudo
+        qta: 320
+        unita: g
+      - food: radicchio
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: vino_rosso
+        qta: 80
+        unita: ml
+      - food: brodo_vegetale
+        qta: 1000
+        unita: ml
+      - food: burro
+        qta: 30
+        unita: g
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: zuppa-farro-verdure-legumi
+    nome: "Zuppa di farro con verdure e legumi"
+    categoria: zuppa
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: farro_crudo
+        qta: 250
+        unita: g
+      - food: fagioli_cannellini
+        qta: 240
+        unita: g
+      - food: lenticchie
+        qta: 150
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 120
+        unita: g
+      - food: sedano
+        qta: 80
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: patate_crude
+        qta: 200
+        unita: g
+      - food: zucca
+        qta: 250
+        unita: g
+      - food: passata
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: rosmarino
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: parmigiano
+        qta: 40
+        unita: g
+    fonte: famiglia
+
+  - id: zuppa-farro-funghi-speck
+    nome: "Zuppa di farro con funghi e speck"
+    categoria: zuppa
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: farro_crudo
+        qta: 280
+        unita: g
+      - food: funghi
+        qta: 300
+        unita: g
+      - food: funghi_porcini_secchi
+        qta: 20
+        unita: g
+      - food: speck
+        qta: 120
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 50
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: vellutata-zucca
+    nome: "Vellutata di zucca"
+    categoria: zuppa
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: zucca
+        qta: 800
+        unita: g
+      - food: patate_crude
+        qta: 250
+        unita: g
+      - food: porro
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: brodo_vegetale
+        qta: 700
+        unita: ml
+      - food: semi_zucca
+        qta: 20
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: rosmarino
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: minestrone
+    nome: "Minestrone di verdure"
+    categoria: zuppa
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 200
+        unita: g
+      - food: carota
+        qta: 150
+        unita: g
+      - food: sedano
+        qta: 100
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: zucchina
+        qta: 150
+        unita: g
+      - food: fagiolini
+        qta: 120
+        unita: g
+      - food: verza
+        qta: 150
+        unita: g
+      - food: bietola
+        qta: 100
+        unita: g
+      - food: fagioli_cannellini
+        qta: 240
+        unita: g
+      - food: piselli
+        qta: 100
+        unita: g
+      - food: passata
+        qta: 150
+        unita: g
+      - food: pasta_secca
+        qta: 120
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: passato-verdura
+    nome: "Passato di verdura"
+    categoria: zuppa
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 300
+        unita: g
+      - food: carota
+        qta: 200
+        unita: g
+      - food: zucchina
+        qta: 200
+        unita: g
+      - food: sedano
+        qta: 100
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: porro
+        qta: 100
+        unita: g
+      - food: spinaci
+        qta: 150
+        unita: g
+      - food: fagiolini
+        qta: 150
+        unita: g
+      - food: zucca
+        qta: 200
+        unita: g
+      - food: pomodoro
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: parmigiano
+        qta: 40
+        unita: g
+    fonte: famiglia
+
+  - id: zuppa-cicerchie
+    nome: "Zuppa di cicerchie"
+    categoria: zuppa
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: cicerchie
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 60
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: passata
+        qta: 200
+        unita: g
+      - food: pasta_secca
+        qta: 160
+        unita: g
+      - food: olio_oliva
+        qta: 4
+        unita: cucchiaio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: polenta-ragu
+    nome: "Polenta al ragù"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: polenta
+        qta: 300
+        unita: g
+      - food: manzo_macinato
+        qta: 400
+        unita: g
+      - food: salsiccia
+        qta: 150
+        unita: g
+      - food: passata
+        qta: 500
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 50
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polenta-concia
+    nome: "Polenta concia (con formaggio)"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: polenta
+        qta: 320
+        unita: g
+      - food: fontina_delattosata
+        qta: 250
+        unita: g
+      - food: burro
+        qta: 80
+        unita: g
+      - food: grana_padano
+        qta: 50
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polenta-fritta
+    nome: "Polenta fritta"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: polenta
+        qta: 300
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 40
+        unita: g
+    fonte: famiglia
+
+  - id: polenta-forno
+    nome: "Polenta al forno"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: polenta
+        qta: 300
+        unita: g
+      - food: passata
+        qta: 400
+        unita: g
+      - food: mozzarella_delattosata
+        qta: 200
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: burro
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: basilico
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: polenta-funghi
+    nome: "Polenta ai funghi"
+    categoria: primo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: polenta
+        qta: 300
+        unita: g
+      - food: funghi
+        qta: 400
+        unita: g
+      - food: funghi_porcini_secchi
+        qta: 25
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: passata
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: burro
+        qta: 20
+        unita: g
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: frittata-albumi
+    nome: "Frittata di soli albumi"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: albume
+        qta: 10
+        unita: pz
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: frittata-spinaci
+    nome: "Frittata di spinaci"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: spinaci
+        qta: 500
+        unita: g
+      - food: uovo
+        qta: 6
+        unita: pz
+      - food: parmigiano
+        qta: 45
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polpette-melanzane
+    nome: "Polpette di melanzane"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: melanzana
+        qta: 800
+        unita: g
+      - food: pane_bianco
+        qta: 100
+        unita: g
+      - food: parmigiano
+        qta: 60
+        unita: g
+      - food: uovo
+        qta: 1
+        unita: pz
+      - food: pangrattato
+        qta: 60
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+    fonte: famiglia
+
+  - id: felafel
+    nome: "Felafel di ceci"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: ceci
+        qta: 300
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: cumino
+        qta: 0
+        unita: qb
+      - food: coriandolo
+        qta: 0
+        unita: qb
+      - food: farina_ceci
+        qta: 40
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+    fonte: famiglia
+
+  - id: hummus-ceci
+    nome: "Hummus di ceci"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: ceci
+        qta: 400
+        unita: g
+      - food: tahini
+        qta: 60
+        unita: g
+      - food: limone
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: cumino
+        qta: 0
+        unita: qb
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: hummus-fagioli
+    nome: "Hummus di fagioli"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: fagioli_cannellini
+        qta: 400
+        unita: g
+      - food: tahini
+        qta: 2
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: limone
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: cumino
+        qta: 0
+        unita: qb
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: cecina
+    nome: "Cecina (farinata di ceci)"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: farina_ceci
+        qta: 250
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: zucca-forno
+    nome: "Zucca al forno"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: zucca
+        qta: 1000
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: rosmarino
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: focaccia-zucca
+    nome: "Focaccia di zucca"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: farina_00
+        qta: 350
+        unita: g
+      - food: zucca
+        qta: 250
+        unita: g
+      - food: lievito_birra
+        qta: 5
+        unita: g
+      - food: latte_delattosato
+        qta: 35
+        unita: ml
+      - food: olio_oliva
+        qta: 4
+        unita: cucchiaio
+      - food: zucchero
+        qta: 5
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: semi_zucca
+        qta: 15
+        unita: g
+      - food: rosmarino
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: patate-fritte
+    nome: "Patate fritte"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 800
+        unita: g
+      - food: olio_oliva
+        qta: 70
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: patate-forno
+    nome: "Patate al forno"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 800
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: rosmarino
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: patate-verde
+    nome: "Patate al verde (con prezzemolo e aglio)"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 800
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: babaganoush
+    nome: "Babaganoush (crema di melanzane e tahini)"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: melanzana
+        qta: 800
+        unita: g
+      - food: tahini
+        qta: 3
+        unita: cucchiaio
+      - food: limone
+        qta: 2
+        unita: cucchiaio
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: cumino
+        qta: 0
+        unita: qb
+      - food: paprika
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: zucchine-friggitrice
+    nome: "Zucchine in friggitrice ad aria"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: zucchina
+        qta: 600
+        unita: g
+      - food: pangrattato
+        qta: 80
+        unita: g
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: polenta
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: broccoli-vapore
+    nome: "Broccoli al vapore"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: broccoli
+        qta: 800
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: limone
+        qta: 0.5
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: spinaci-ripassati
+    nome: "Spinaci ripassati in padella"
+    categoria: contorno
+    porzioni: 4
+    ingredienti:
+      - food: spinaci
+        qta: 1000
+        unita: g
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: insalata-finocchi
+    nome: "Insalata di finocchi"
+    categoria: contorno
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: finocchio
+        qta: 600
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: limone
+        qta: 1
+        unita: pz
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: curry-verdure
+    nome: "Curry di verdure"
+    categoria: piatto-unico
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 400
+        unita: g
+      - food: zucchina
+        qta: 300
+        unita: g
+      - food: carota
+        qta: 160
+        unita: g
+      - food: peperone
+        qta: 200
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: ceci
+        qta: 240
+        unita: g
+      - food: spinaci
+        qta: 150
+        unita: g
+      - food: latte_cocco
+        qta: 400
+        unita: ml
+      - food: passata
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: curry_polvere
+        qta: 0
+        unita: qb
+      - food: zenzero
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polpette-sugo
+    nome: "Polpette di carne al sugo"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: manzo_macinato
+        qta: 500
+        unita: g
+      - food: pane_bianco
+        qta: 50
+        unita: g
+      - food: latte_delattosato
+        qta: 50
+        unita: ml
+      - food: uovo
+        qta: 1
+        unita: pz
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: passata
+        qta: 700
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polpette-bianche
+    nome: "Polpette di carne bianche (in bianco)"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: macinato_pollo
+        qta: 500
+        unita: g
+      - food: uovo
+        qta: 1
+        unita: pz
+      - food: pane_bianco
+        qta: 40
+        unita: g
+      - food: latte_delattosato
+        qta: 50
+        unita: ml
+      - food: parmigiano
+        qta: 40
+        unita: g
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: burro
+        qta: 15
+        unita: g
+    fonte: famiglia
+
+  - id: polpettone-rosso
+    nome: "Polpettone al sugo"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: manzo_macinato
+        qta: 600
+        unita: g
+      - food: uovo
+        qta: 2
+        unita: pz
+      - food: pane_bianco
+        qta: 60
+        unita: g
+      - food: latte_delattosato
+        qta: 80
+        unita: ml
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: passata
+        qta: 400
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: basilico
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: polpettone-bianco
+    nome: "Polpettone in bianco"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: manzo_macinato
+        qta: 500
+        unita: g
+      - food: uovo
+        qta: 2
+        unita: pz
+      - food: parmigiano
+        qta: 50
+        unita: g
+      - food: pane_bianco
+        qta: 60
+        unita: g
+      - food: latte_delattosato
+        qta: 100
+        unita: ml
+      - food: prosciutto_cotto
+        qta: 80
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: polpettone-verdure
+    nome: "Polpettone di verdure"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: patate_crude
+        qta: 500
+        unita: g
+      - food: fagiolini
+        qta: 550
+        unita: g
+      - food: uovo
+        qta: 3
+        unita: pz
+      - food: parmigiano
+        qta: 80
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: pangrattato
+        qta: 50
+        unita: g
+      - food: maggiorana
+        qta: 1
+        unita: qb
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: hamburger
+    nome: "Hamburger di manzo"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: manzo_macinato
+        qta: 500
+        unita: g
+      - food: uovo
+        qta: 1
+        unita: pz
+      - food: pane_bianco
+        qta: 40
+        unita: g
+      - food: latte_delattosato
+        qta: 50
+        unita: ml
+      - food: parmigiano
+        qta: 30
+        unita: g
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+    fonte: famiglia
+
+  - id: lonza-finocchietto
+    nome: "Lonza di maiale al finocchietto"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: maiale_lonza
+        qta: 800
+        unita: g
+      - food: finocchietto
+        qta: 1
+        unita: cucchiaio
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: vino_bianco
+        qta: 150
+        unita: ml
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: roast-beef
+    nome: "Roast beef all'inglese"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [primavera, estate]
+    ingredienti:
+      - food: manzo_arrosto
+        qta: 900
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: rosmarino
+        qta: 0
+        unita: qb
+      - food: salvia
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: vino_bianco
+        qta: 50
+        unita: ml
+    fonte: famiglia
+
+  - id: costine-ubriache
+    nome: "Costine ubriache (al vino rosso)"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: costine_maiale
+        qta: 1200
+        unita: g
+      - food: vino_rosso
+        qta: 500
+        unita: ml
+      - food: farina_00
+        qta: 20
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: scaloppine-senape
+    nome: "Scaloppine alla senape"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: vitello
+        qta: 650
+        unita: g
+      - food: farina_00
+        qta: 40
+        unita: g
+      - food: burro
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 1
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 100
+        unita: ml
+      - food: panna_delattosata
+        qta: 200
+        unita: ml
+      - food: senape_dijon
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: scaloppine-anacardi
+    nome: "Scaloppine agli anacardi"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: vitello
+        qta: 600
+        unita: g
+      - food: farina_00
+        qta: 40
+        unita: g
+      - food: anacardi
+        qta: 100
+        unita: g
+      - food: burro
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 120
+        unita: ml
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: scaloppine-vino
+    nome: "Scaloppine al vino bianco"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: vitello
+        qta: 500
+        unita: g
+      - food: farina_00
+        qta: 40
+        unita: g
+      - food: burro
+        qta: 30
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: vino_bianco
+        qta: 150
+        unita: ml
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: scaloppine-limone
+    nome: "Scaloppine al limone"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: vitello
+        qta: 600
+        unita: g
+      - food: farina_00
+        qta: 40
+        unita: g
+      - food: burro
+        qta: 40
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: limone
+        qta: 2
+        unita: pz
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: brasato
+    nome: "Brasato al vino rosso"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: manzo_stufato
+        qta: 1000
+        unita: g
+      - food: vino_rosso
+        qta: 750
+        unita: ml
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 2
+        unita: pz
+      - food: sedano
+        qta: 100
+        unita: g
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: farina_00
+        qta: 20
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: burro
+        qta: 20
+        unita: g
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: alloro
+        qta: 1
+        unita: qb
+      - food: chiodi_garofano
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: spezzatino
+    nome: "Spezzatino di manzo con patate"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: manzo_stufato
+        qta: 700
+        unita: g
+      - food: patate_crude
+        qta: 600
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: carota
+        qta: 1
+        unita: pz
+      - food: sedano
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: passata
+        qta: 200
+        unita: g
+      - food: farina_00
+        qta: 20
+        unita: g
+      - food: olio_oliva
+        qta: 3
+        unita: cucchiaio
+      - food: vino_rosso
+        qta: 150
+        unita: ml
+      - food: brodo_carne
+        qta: 400
+        unita: ml
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: alloro
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: cotoletta
+    nome: "Cotoletta alla milanese"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: vitello
+        qta: 600
+        unita: g
+      - food: uovo
+        qta: 3
+        unita: pz
+      - food: pangrattato
+        qta: 160
+        unita: g
+      - food: burro
+        qta: 100
+        unita: g
+      - food: limone
+        qta: 1
+        unita: pz
+      - food: sale
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: wurstel-piatto
+    nome: "Würstel e patate in padella"
+    categoria: secondo
+    porzioni: 4
+    ingredienti:
+      - food: wurstel
+        qta: 6
+        unita: pz
+      - food: patate_crude
+        qta: 800
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: olio_oliva
+        qta: 4
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: rosmarino
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: baccala-mantecato
+    nome: "Baccalà mantecato"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: baccala
+        qta: 500
+        unita: g
+      - food: olio_oliva
+        qta: 8
+        unita: cucchiaio
+      - food: aglio
+        qta: 1
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
+  - id: baccala-sugo
+    nome: "Baccalà al sugo (in umido con pomodoro)"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [autunno, inverno]
+    ingredienti:
+      - food: baccala
+        qta: 700
+        unita: g
+      - food: passata
+        qta: 500
+        unita: g
+      - food: farina_00
+        qta: 30
+        unita: g
+      - food: cipolla
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: olio_oliva
+        qta: 4
+        unita: cucchiaio
+      - food: olive_nere
+        qta: 60
+        unita: g
+      - food: capperi
+        qta: 1
+        unita: cucchiaio
+      - food: prezzemolo
+        qta: 1
+        unita: qb
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
+  - id: orata-sale
+    nome: "Orata al sale"
+    categoria: secondo
+    porzioni: 4
+    stagioni: [estate]
+    ingredienti:
+      - food: orata
+        qta: 1000
+        unita: g
+      - food: sale
+        qta: 0
+        unita: qb
+      - food: limone
+        qta: 1
+        unita: pz
+      - food: aglio
+        qta: 2
+        unita: spicchio
+      - food: prezzemolo
+        qta: 0
+        unita: qb
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: pepe_nero
+        qta: 0
+        unita: qb
+    fonte: famiglia
+
 # --- Pasti (composizioni: ricette + cibi) ---
 pasti:
   - id: pranzo-tonno-fagioli
