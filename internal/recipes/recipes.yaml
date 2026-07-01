@@ -3613,6 +3613,41 @@ ricette:
         unita: qb
     fonte: famiglia
 
+  - id: riso-cantonese-veg
+    nome: "Riso alla cantonese (vegetariano)"
+    categoria: primo
+    porzioni: 4
+    tag: [vegetariano]
+    ingredienti:
+      - food: riso_bianco_crudo   # basmati, a crudo
+        qta: 240
+        unita: g
+      - food: uovo
+        qta: 3
+        unita: pz
+      - food: tofu
+        qta: 125
+        unita: g
+      - food: seitan
+        qta: 100
+        unita: g
+      - food: piselli
+        qta: 200
+        unita: g
+      - food: olio_oliva
+        qta: 2
+        unita: cucchiaio
+      - food: salsa_soia
+        qta: 2
+        unita: cucchiaio
+      - food: sale
+        qta: 1
+        unita: qb
+      - food: pepe_nero
+        qta: 1
+        unita: qb
+    fonte: famiglia
+
 # --- Pasti (composizioni: ricette + cibi) ---
 pasti:
   - id: pranzo-tonno-fagioli
