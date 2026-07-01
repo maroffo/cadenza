@@ -203,29 +203,25 @@ func TestSuggestExcludesAllergenHard(t *testing.T) {
 }
 
 func TestSuggestSeasonSoftRanking(t *testing.T) {
-	b := book(t)
-	out := b.Suggest(SuggestFilter{Season: "inverno", ExcludeAllergens: []string{"lactose"}})
-
-	// colazione (lactose) is hard-excluded.
-	for _, r := range out {
-		if r.ID == "colazione-avena-chia-yogurt" {
-			t.Fatal("lactose recipe should be excluded")
-		}
+	// Controlled book: the ranking invariant must hold regardless of how large
+	// the real recipe book grows. No exclusion, so ingredient resolution is not
+	// involved (these synthetic recipes carry no ingredients).
+	b := rawBook(
+		Recipe{ID: "annuale", Categoria: "primo"},                              // no seasons -> always in season
+		Recipe{ID: "estiva", Categoria: "primo", Stagioni: []string{"estate"}}, // out of season in winter
+		Recipe{ID: "invernale", Categoria: "primo", Stagioni: []string{"inverno"}},
+	)
+	out := b.Suggest(SuggestFilter{Season: "inverno", Limit: 10})
+	if len(out) != 3 {
+		t.Fatalf("got %v", ids(out))
 	}
-
-	// In-season (all-year) recipes must rank before out-of-season summer ones.
-	posTonno := indexOf(out, "tonno-fagioli")    // no seasons -> in season in winter
-	posInsalata := indexOf(out, "insalata-riso") // summer only -> out of season
-	posPasta := indexOf(out, "pasta-zucchine-tempeh")
-	if posTonno < 0 || posInsalata < 0 || posPasta < 0 {
-		t.Fatalf("expected all three recipes present, got %v", ids(out))
+	// In-season (annuale, invernale) rank before the out-of-season summer recipe.
+	if indexOf(out, "estiva") != len(out)-1 {
+		t.Errorf("summer recipe should rank last in winter: %v", ids(out))
 	}
-	if posTonno > posInsalata || posTonno > posPasta {
-		t.Errorf("in-season tonno-fagioli should rank before summer recipes: %v", ids(out))
-	}
-	// Within the out-of-season group, book order is preserved (insalata before pasta).
-	if posInsalata > posPasta {
-		t.Errorf("book order should be preserved within group: %v", ids(out))
+	// Book order preserved within the in-season group (annuale before invernale).
+	if indexOf(out, "annuale") > indexOf(out, "invernale") {
+		t.Errorf("book order not preserved within group: %v", ids(out))
 	}
 }
 
