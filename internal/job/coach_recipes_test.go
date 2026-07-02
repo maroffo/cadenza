@@ -48,7 +48,7 @@ func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
 		TZ:                   testTZ,
 	}
 	// FAMILY meals (a shared course) must never carry lactose.
-	reply, err := c.suggestRecipe([]byte(`{"categoria":"primo"}`))
+	reply, err := c.suggestRecipe(context.Background(), []byte(`{"categoria":"primo"}`))
 	if err != nil {
 		t.Fatalf("suggestRecipe: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
 
 	// The athlete's PERSONAL breakfast (lactose) is exempt from the family
 	// exclusion and must still be offered when he asks for it.
-	repC, _ := c.suggestRecipe([]byte(`{"categoria":"colazione"}`))
+	repC, _ := c.suggestRecipe(context.Background(), []byte(`{"categoria":"colazione"}`))
 	found := false
 	for _, r := range parseSuggest(t, repC) {
 		if r.ID == "colazione-avena-chia-yogurt" {
@@ -84,7 +84,7 @@ func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
 func TestSuggestRecipe_SeasonFromClock(t *testing.T) {
 	// fixedNow is in June -> estate; the summer recipes should be in season.
 	c := &Coach{Recipes: recipeBook(t), MealExcludeAllergens: []string{"lactose"}, Now: fixedNow, TZ: testTZ}
-	reply, _ := c.suggestRecipe([]byte(`{}`))
+	reply, _ := c.suggestRecipe(context.Background(), []byte(`{}`))
 	if !strings.Contains(reply, `"stagione":"estate"`) {
 		t.Errorf("expected estate in June, got: %s", reply)
 	}
@@ -93,7 +93,7 @@ func TestSuggestRecipe_SeasonFromClock(t *testing.T) {
 func TestSuggestRecipe_WinterDeprioritisesSummer(t *testing.T) {
 	jan := func() time.Time { return time.Date(2026, 1, 15, 9, 0, 0, 0, testTZ) }
 	c := &Coach{Recipes: recipeBook(t), MealExcludeAllergens: []string{"lactose"}, Now: jan, TZ: testTZ}
-	reply, _ := c.suggestRecipe([]byte(`{}`))
+	reply, _ := c.suggestRecipe(context.Background(), []byte(`{}`))
 	if !strings.Contains(reply, `"stagione":"inverno"`) {
 		t.Errorf("expected inverno in January, got: %s", reply)
 	}
@@ -126,7 +126,7 @@ func TestSuggestRecipeToolGatedByBook(t *testing.T) {
 
 func TestSuggestRecipe_EmptyResult(t *testing.T) {
 	c := &Coach{Recipes: recipeBook(t), MealExcludeAllergens: []string{"lactose"}, Now: fixedNow, TZ: testTZ}
-	reply, err := c.suggestRecipe([]byte(`{"categoria":"categoria_inesistente"}`))
+	reply, err := c.suggestRecipe(context.Background(), []byte(`{"categoria":"categoria_inesistente"}`))
 	if err != nil {
 		t.Fatalf("suggestRecipe: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestSuggestRecipe_EmptyResult(t *testing.T) {
 
 func TestListRecipes_ReturnsWholeBookIncludingOffSeason(t *testing.T) {
 	c := &Coach{Recipes: recipeBook(t), MealExcludeAllergens: []string{"lactose"}, Now: fixedNow, TZ: testTZ}
-	reply, err := c.listRecipes([]byte(`{}`))
+	reply, err := c.listRecipes(context.Background(), []byte(`{}`))
 	if err != nil {
 		t.Fatalf("listRecipes: %v", err)
 	}

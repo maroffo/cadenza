@@ -4,6 +4,7 @@
 package recipes
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"math"
@@ -87,60 +88,116 @@ type Book struct {
 	cat         *foods.Catalog
 }
 
-// Load parses the embedded recipes.yaml, builds the id indexes, and binds the
-// food catalog used for all derivations.
+// Load parses the embedded recipes.yaml and builds the book, binding the food
+// catalog used for all derivations. The embedded book is CURATED, so any
+// unresolved reference is a build-time bug: Load fails loud (strict), it does
+// not quarantine. Firestore-sourced books quarantine instead (see buildBook,
+// used by the provider) so one bad row can never take the coach's recipes down.
 func Load(cat *foods.Catalog) (*Book, error) {
 	if cat == nil {
 		return nil, fmt.Errorf("recipes: nil catalog")
 	}
-	var bf bookFile
-	if err := yaml.Unmarshal(recipesYAML, &bf); err != nil {
-		return nil, fmt.Errorf("recipes: parse recipes.yaml: %w", err)
-	}
-	b := &Book{
-		misure:      bf.Misure,
-		recipes:     bf.Ricette,
-		recipesByID: make(map[string]Recipe, len(bf.Ricette)),
-		meals:       bf.Pasti,
-		mealsByID:   make(map[string]Meal, len(bf.Pasti)),
-		cat:         cat,
-	}
-	for _, r := range bf.Ricette {
-		b.recipesByID[r.ID] = r
-	}
-	for _, m := range bf.Pasti {
-		b.mealsByID[m.ID] = m
-	}
-	// Fail closed at load: every recipe/meal reference must resolve against the
-	// catalog, so the allergen filter can never silently fail open on a missing
-	// ingredient (a renamed/removed food would otherwise hide its lactose tag).
-	if err := b.validate(); err != nil {
+	bf, err := parseEmbedded()
+	if err != nil {
 		return nil, err
+	}
+	b, problems := buildBook(bf.Misure, bf.Ricette, bf.Pasti, cat)
+	if len(problems) > 0 {
+		return nil, fmt.Errorf("recipes: %d riferimenti non risolti nel libro embedded: %s",
+			len(problems), strings.Join(problems, "; "))
 	}
 	return b, nil
 }
 
-// validate reports any recipe ingredient, meal food, or meal recipe-reference
-// that does not resolve against the bound catalog / recipe set.
+// parseEmbedded unmarshals the embedded recipes.yaml into its wrapper.
+func parseEmbedded() (bookFile, error) {
+	var bf bookFile
+	if err := yaml.Unmarshal(recipesYAML, &bf); err != nil {
+		return bookFile{}, fmt.Errorf("recipes: parse recipes.yaml: %w", err)
+	}
+	return bf, nil
+}
+
+// buildBook assembles a Book from any source (embedded YAML or Firestore),
+// QUARANTINING every recipe/meal whose references don't resolve: the returned
+// Book contains only fully-resolvable entries, and problems lists what was
+// dropped and why. This keeps the allergen filter fail-closed (a recipe whose
+// allergens can't be derived is simply absent, never suggested) without letting
+// a single malformed row abort the whole book. cat must be non-nil.
+func buildBook(misure map[string]Measure, rs []Recipe, ms []Meal, cat *foods.Catalog) (*Book, []string) {
+	var problems []string
+	validRecipes := make([]Recipe, 0, len(rs))
+	recipesByID := make(map[string]Recipe, len(rs))
+	for _, r := range rs {
+		if bad := recipeUnresolved(cat, r); len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("ricetta %q: alimento sconosciuto %s", r.ID, strings.Join(bad, ", ")))
+			continue
+		}
+		validRecipes = append(validRecipes, r)
+		recipesByID[r.ID] = r
+	}
+	validMeals := make([]Meal, 0, len(ms))
+	mealsByID := make(map[string]Meal, len(ms))
+	for _, mm := range ms {
+		if bad := mealUnresolved(cat, recipesByID, mm); len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("pasto %q: riferimenti non risolti %s", mm.ID, strings.Join(bad, ", ")))
+			continue
+		}
+		validMeals = append(validMeals, mm)
+		mealsByID[mm.ID] = mm
+	}
+	return &Book{
+		misure:      misure,
+		recipes:     validRecipes,
+		recipesByID: recipesByID,
+		meals:       validMeals,
+		mealsByID:   mealsByID,
+		cat:         cat,
+	}, problems
+}
+
+// recipeUnresolved returns the ids of a recipe's ingredients that don't exist in
+// the catalog (empty = fully resolvable, so its allergen profile is complete).
+func recipeUnresolved(cat *foods.Catalog, r Recipe) []string {
+	var bad []string
+	for _, ing := range r.Ingredienti {
+		if _, ok := cat.ByID(ing.Food); !ok {
+			bad = append(bad, ing.Food)
+		}
+	}
+	return bad
+}
+
+// mealUnresolved returns a meal's references (recipe refs + direct foods) that
+// don't resolve against the surviving recipes / the catalog.
+func mealUnresolved(cat *foods.Catalog, recipesByID map[string]Recipe, m Meal) []string {
+	var bad []string
+	for _, ref := range m.Ricette {
+		if _, ok := recipesByID[ref.Ricetta]; !ok {
+			bad = append(bad, "ricetta:"+ref.Ricetta)
+		}
+	}
+	for _, ing := range m.Cibi {
+		if _, ok := cat.ByID(ing.Food); !ok {
+			bad = append(bad, ing.Food)
+		}
+	}
+	return bad
+}
+
+// validate reports any recipe ingredient, meal food, or meal recipe-reference in
+// the current book that does not resolve. A book from buildBook always passes
+// (invalid entries are quarantined at build time); this guards hand-built books.
 func (b *Book) validate() error {
 	var problems []string
 	for _, r := range b.recipes {
-		for _, ing := range r.Ingredienti {
-			if _, ok := b.cat.ByID(ing.Food); !ok {
-				problems = append(problems, fmt.Sprintf("ricetta %q: alimento sconosciuto %q", r.ID, ing.Food))
-			}
+		if bad := recipeUnresolved(b.cat, r); len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("ricetta %q: alimento sconosciuto %s", r.ID, strings.Join(bad, ", ")))
 		}
 	}
 	for _, mm := range b.meals {
-		for _, ref := range mm.Ricette {
-			if _, ok := b.recipesByID[ref.Ricetta]; !ok {
-				problems = append(problems, fmt.Sprintf("pasto %q: ricetta sconosciuta %q", mm.ID, ref.Ricetta))
-			}
-		}
-		for _, ing := range mm.Cibi {
-			if _, ok := b.cat.ByID(ing.Food); !ok {
-				problems = append(problems, fmt.Sprintf("pasto %q: alimento sconosciuto %q", mm.ID, ing.Food))
-			}
+		if bad := mealUnresolved(b.cat, b.recipesByID, mm); len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("pasto %q: riferimenti non risolti %s", mm.ID, strings.Join(bad, ", ")))
 		}
 	}
 	if len(problems) > 0 {
@@ -152,15 +209,10 @@ func (b *Book) validate() error {
 // resolves reports whether every ingredient of a recipe exists in the catalog.
 // A recipe that does not fully resolve has an UNKNOWN allergen profile.
 func (b *Book) resolves(r Recipe) bool {
-	for _, ing := range r.Ingredienti {
-		if _, ok := b.cat.ByID(ing.Food); !ok {
-			return false
-		}
-	}
-	return true
+	return len(recipeUnresolved(b.cat, r)) == 0
 }
 
-// MustLoad is Load but panics on error; intended for main wiring.
+// MustLoad is Load but panics on error; intended for main wiring and tests.
 func MustLoad(cat *foods.Catalog) *Book {
 	b, err := Load(cat)
 	if err != nil {
@@ -168,6 +220,12 @@ func MustLoad(cat *foods.Catalog) *Book {
 	}
 	return b
 }
+
+// Book satisfies BookProvider for an already-built, static book: the book yields
+// itself. Tests and any caller that doesn't need runtime mutability can pass a
+// *Book directly where a BookProvider is expected; the Firestore-backed Provider
+// is the mutable implementation.
+func (b *Book) Book(context.Context) (*Book, error) { return b, nil }
 
 // grams resolves an ingredient's quantity+unit to grams of edible food. The
 // food must exist in the catalog (needed for pz/per-food lookups). Unknown units

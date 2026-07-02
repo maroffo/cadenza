@@ -278,7 +278,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Summary:              agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
 			Catalog:              exCatalog,
 			Foods:                foodsCat,
-			Recipes:              recipes.MustLoad(foodsCat),
+			Recipes:              recipes.NewProvider(store.NewRecipes(fsClient), foodsCat),
 			MealExcludeAllergens: cfg.MealExcludeAllergens,
 			MediaCache:           store.NewMediaCache(fsClient),
 			Animator:             sender,
