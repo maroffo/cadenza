@@ -51,6 +51,43 @@ func TestMorningBody_StaleDataIsLabeled(t *testing.T) {
 	}
 }
 
+func TestMorningRoutine_RendersGroupsAndSkipsEmpty(t *testing.T) {
+	out := MorningRoutine([]RoutineGroup{
+		{Label: "Braccia", Exercises: []RoutineExercise{
+			{Name: "Band Curl", Equipment: "band"},
+			{Name: "Push-up", Equipment: "body weight"},
+		}},
+		{Label: "Gambe", Exercises: nil}, // empty group must be skipped
+	})
+	if !strings.Contains(out, "Braccia") || !strings.Contains(out, "Band Curl") {
+		t.Errorf("routine missing content:\n%s", out)
+	}
+	if strings.Contains(out, "Gambe") {
+		t.Errorf("empty group should be skipped:\n%s", out)
+	}
+	if strings.Contains(out, "<table") {
+		t.Errorf("routine uses unsupported HTML:\n%s", out)
+	}
+}
+
+func TestMorningRoutine_EmptyInputRendersEmpty(t *testing.T) {
+	if got := MorningRoutine(nil); got != "" {
+		t.Errorf("nil groups = %q, want empty", got)
+	}
+	if got := MorningRoutine([]RoutineGroup{{Label: "Braccia"}}); got != "" {
+		t.Errorf("all-empty groups = %q, want empty", got)
+	}
+}
+
+func TestMorningRoutine_EscapesNames(t *testing.T) {
+	out := MorningRoutine([]RoutineGroup{
+		{Label: "Core", Exercises: []RoutineExercise{{Name: "A<b>&x", Equipment: "b<a"}}},
+	})
+	if strings.Contains(out, "A<b>&x") || strings.Contains(out, "b<a") {
+		t.Errorf("dynamic exercise text not HTML-escaped:\n%s", out)
+	}
+}
+
 func TestDegradedTemplates_NeverEmpty(t *testing.T) {
 	cases := map[string]string{
 		"icu_down_no_data": DegradedNoData(),

@@ -1,5 +1,5 @@
 // ABOUTME: The conversational coach flow: session continuity, tools, mutations with confirmation.
-// ABOUTME: Free text becomes coaching; every reply still carries the code-owned verdict footer.
+// ABOUTME: Replies carry no verdict footer (that lives in the morning message); the verdict still travels in the model's context so the coach respects it.
 
 package job
 
@@ -159,14 +159,17 @@ type RuleCounter interface {
 // Converse handles one free-text athlete message end to end (Telegram path:
 // replies are sent through c.Out).
 func (c *Coach) Converse(ctx context.Context, text string) error {
-	reply, v, demos, degraded, err := c.converse(ctx, text)
+	// The verdict is intentionally dropped from the reply here: the footer
+	// belongs only to the morning message. It still reaches the model inside
+	// converse (userText), so the coach honors it without repeating it.
+	reply, _, demos, degraded, err := c.converse(ctx, text)
 	if err != nil {
 		return err
 	}
 	if degraded != "" {
 		return c.Out.Send(ctx, degraded)
 	}
-	if err := c.Out.SendWithVerdict(ctx, reply, v); err != nil {
+	if err := c.Out.Send(ctx, reply); err != nil {
 		// The Opus run is CONSUMED: an error here would release the dedup
 		// reservation and re-run the whole model call with fresh tool_use
 		// ids (duplicate proposals, duplicate confirm prompts). severity

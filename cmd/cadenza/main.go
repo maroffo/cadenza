@@ -209,6 +209,8 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 
 	runs := store.NewRuns(fsClient)
 	injuries := store.NewInjuries(fsClient)
+	// One embedded catalog shared by the morning routine and the coach tool.
+	exCatalog := exercises.MustLoad()
 	injuryJob := job.InjuryJob{
 		Injuries: injuries, Out: sender, Keyboard: sender, Retry: retry,
 		Now: time.Now, TZ: tz,
@@ -223,18 +225,20 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		TZ:         tz,
 	}
 	morning := job.Morning{
-		Wellness: job.ICU{C: icuClient},
-		Profiles: store.NewProfiles(fsClient),
-		Out:      sender,
-		Runs:     runs,
-		Injuries: injuries,
-		Events:   job.ICU{C: icuClient},
-		Checkins: store.NewCheckins(fsClient),
-		Keyboard: sender,
-		Debrief:  &debrief,
-		Retry:    retry,
-		Now:      time.Now,
-		TZ:       tz,
+		Wellness:  job.ICU{C: icuClient},
+		Profiles:  store.NewProfiles(fsClient),
+		Out:       sender,
+		Runs:      runs,
+		Injuries:  injuries,
+		Events:    job.ICU{C: icuClient},
+		Checkins:  store.NewCheckins(fsClient),
+		Keyboard:  sender,
+		Debrief:   &debrief,
+		Retry:     retry,
+		Exercises: exCatalog,
+		Equipment: cfg.DefaultEquipment,
+		Now:       time.Now,
+		TZ:        tz,
 	}
 	message := job.Message{
 		AllowedUserID: cfg.TelegramChatID,
@@ -272,7 +276,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Events:               job.ICU{C: icuClient},
 			Plans:                store.NewLedger(fsClient),
 			Summary:              agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
-			Catalog:              exercises.MustLoad(),
+			Catalog:              exCatalog,
 			Foods:                foodsCat,
 			Recipes:              recipes.MustLoad(foodsCat),
 			MealExcludeAllergens: cfg.MealExcludeAllergens,

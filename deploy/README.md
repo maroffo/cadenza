@@ -49,7 +49,7 @@
 
 - `gcloud scheduler jobs run cadenza-morning --location=europe-west1` → message on the phone with real numbers + verdict.
 - Run it twice → second run logs "already completed, no-op", no duplicate message.
-- `gcloud scheduler jobs pause cadenza-morning`, wait for 07:15 next day → watchdog message + alert email. Unpause.
+- `gcloud scheduler jobs pause cadenza-morning`, wait for 09:15 next day → watchdog message + alert email. Unpause.
 
 ## Secret rotation
 

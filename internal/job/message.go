@@ -154,7 +154,7 @@ func (m Message) handleMessage(ctx context.Context, u *tgUpdate) error {
 		}
 		return m.Out.Send(ctx,
 			"👋 <b>Cadenza attivo.</b>\n"+
-				"Check mattutino automatico alle 07:00.\n"+
+				"Check mattutino automatico alle 09:00.\n"+
 				"/status per i numeri di oggi, /test per provare i bottoni.")
 	case "/status":
 		body, v, err := m.Status.Compose(ctx)

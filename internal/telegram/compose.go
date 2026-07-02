@@ -115,6 +115,44 @@ func MorningBody(d MorningData) string {
 	return b.String()
 }
 
+// RoutineExercise is one exercise line in the morning routine block. Name and
+// Equipment are the catalog's values; the job layer maps them here so this
+// package never imports the exercise catalog (same seam as MorningData).
+type RoutineExercise struct {
+	Name      string
+	Equipment string
+}
+
+// RoutineGroup is a labeled muscle group with its chosen exercises for the day.
+type RoutineGroup struct {
+	Label     string
+	Exercises []RoutineExercise
+}
+
+// MorningRoutine renders the daily prevention/strength block appended to the
+// morning message. Empty groups are skipped; an all-empty input renders "".
+func MorningRoutine(groups []RoutineGroup) string {
+	var lines []string
+	for _, g := range groups {
+		if len(g.Exercises) == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("<b>%s</b>", Escape(g.Label)))
+		for _, ex := range g.Exercises {
+			line := "• " + Escape(ex.Name)
+			if ex.Equipment != "" {
+				line += fmt.Sprintf(" <i>(%s)</i>", Escape(ex.Equipment))
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "🏋️ <b>Prevenzione &amp; forza di oggi</b>\n" + strings.Join(lines, "\n") +
+		"\n<i>Chiedi al coach la GIF di un esercizio se non lo conosci.</i>"
+}
+
 // DegradedNoData: intervals.icu unreachable and no usable cache. No verdict
 // is possible; the instruction errs toward less load (fail-safe direction).
 func DegradedNoData() string {
@@ -130,11 +168,11 @@ func DegradedLLMDown() string {
 	return "ℹ️ <i>Coach offline (errore API, riproverò): qui sotto i numeri e il verdetto deterministico.</i>"
 }
 
-// WatchdogMissedMorning: the 07:00 check never completed. Sent by the
+// WatchdogMissedMorning: the 09:00 check never completed. Sent by the
 // watchdog job alongside the ERROR log that triggers the email alert.
 func WatchdogMissedMorning() string {
 	return "⚠️ <b>Check mattutino mancato</b>\n" +
-		"Il controllo delle 07:00 non è andato a buon fine (problema tecnico, " +
+		"Il controllo delle 09:00 non è andato a buon fine (problema tecnico, " +
 		"sto già suonando l'allarme via email).\n" +
 		"Nel dubbio: vai a sensazione e resta facile, Z2, niente qualità."
 }

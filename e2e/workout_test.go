@@ -163,11 +163,14 @@ func TestWorkoutWrite_EndToEnd(t *testing.T) {
 		t.Errorf("ledger = %+v", rec)
 	}
 
-	// The athlete got the confirmation with the verdict footer.
+	// The athlete got the confirmation, footer-free (verdict is morning-only).
 	sink.mu.Lock()
 	text := sink.texts[len(sink.texts)-1]
 	sink.mu.Unlock()
-	if !strings.Contains(text, "Scritto") || !strings.Contains(text, "VERDETTO") {
+	if !strings.Contains(text, "Scritto") {
 		t.Errorf("reply malformed:\n%s", text)
+	}
+	if strings.Contains(text, "VERDETTO") {
+		t.Errorf("conversational reply leaked the verdict footer:\n%s", text)
 	}
 }

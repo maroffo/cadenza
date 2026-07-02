@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maroffo/cadenza/internal/agent"
+	"github.com/maroffo/cadenza/internal/exercises"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
@@ -832,5 +833,50 @@ func TestMorning_CheckinFillsVerdictGapsOnly(t *testing.T) {
 	}
 	if *in.Today.Fatigue != 1 {
 		t.Fatalf("tap overrode device data: fatigue=%d", *in.Today.Fatigue)
+	}
+}
+
+func TestMorning_RoutineAppendedWhenCatalogWired(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
+	m.Exercises = exercises.MustLoad() // full kit (Equipment nil)
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.bodies) != 1 {
+		t.Fatalf("sends = %d, want 1", len(out.bodies))
+	}
+	body := out.bodies[0]
+	if !strings.Contains(body, "Prevenzione") {
+		t.Errorf("routine block missing from morning message:\n%s", body)
+	}
+	for _, g := range exercises.RoutineGroups {
+		if !strings.Contains(body, g.Label) {
+			t.Errorf("routine missing group %q:\n%s", g.Label, body)
+		}
+	}
+	// Deterministic: the same day must render the same routine bytes.
+	out2 := &stubMessenger{}
+	m2 := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out2, newStubRuns())
+	m2.Exercises = exercises.MustLoad()
+	if err := m2.Run(context.Background()); err != nil {
+		t.Fatalf("Run(2): %v", err)
+	}
+	if out2.bodies[0] != body {
+		t.Errorf("routine not deterministic across runs:\n--- run1 ---\n%s\n--- run2 ---\n%s", body, out2.bodies[0])
+	}
+}
+
+func TestMorning_NoRoutineWhenCatalogAbsent(t *testing.T) {
+	out := &stubMessenger{}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, newStubRuns())
+	// Exercises left nil: the block must not appear.
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if strings.Contains(out.bodies[0], "Prevenzione") {
+		t.Errorf("routine block present without a catalog:\n%s", out.bodies[0])
 	}
 }
