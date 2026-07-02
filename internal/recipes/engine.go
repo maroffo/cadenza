@@ -38,6 +38,10 @@ type Recipe struct {
 	Stagioni    []string     `yaml:"stagioni"`
 	Ingredienti []Ingredient `yaml:"ingredienti"`
 	Fonte       string       `yaml:"fonte"`
+	// Personale marks a recipe as the athlete's own (not a shared family meal),
+	// so the family allergen exclusion does not apply to it: he tolerates what
+	// the family cannot (e.g. his lactose breakfast).
+	Personale bool `yaml:"personale"`
 }
 
 // RecipeRef cites a recipe inside a meal and how many of its servings enter the
@@ -341,6 +345,11 @@ type SuggestFilter struct {
 	ExcludeAllergens []string
 	Season           string
 	Limit            int
+	// Query is a by-name lookup ("hai il riso alla cantonese?"): when set, only
+	// recipes whose name/id contain every query word are returned, and the family
+	// allergen exclusion is bypassed (the athlete asked for THAT dish by name; its
+	// allergens are surfaced, not hidden).
+	Query string
 }
 
 const (
@@ -359,16 +368,27 @@ func (b *Book) Suggest(f SuggestFilter) []Recipe {
 		exclude[strings.ToLower(strings.TrimSpace(a))] = true
 	}
 
+	queryWords := strings.Fields(strings.ToLower(strings.TrimSpace(f.Query)))
+
 	var out []Recipe
 	for _, r := range b.recipes {
 		if f.Categoria != "" && r.Categoria != f.Categoria {
 			continue
 		}
-		if len(exclude) > 0 {
-			// Fail closed: a recipe whose ingredients don't fully resolve has an
-			// unknown allergen profile and must NOT be offered while an exclusion
-			// is active. Load() already guarantees this for the embedded book;
-			// this defends a hand-built Book too.
+		if len(queryWords) > 0 {
+			// By-name lookup: every query word must appear in the name or id.
+			// Bypasses the allergen exclusion (direct request for a named dish).
+			hay := strings.ToLower(r.Nome + " " + r.ID)
+			if !containsAllWords(hay, queryWords) {
+				continue
+			}
+		} else if len(exclude) > 0 && !r.Personale {
+			// The family allergen exclusion applies only to SHARED family meals,
+			// not to the athlete's personal recipes (he tolerates what the family
+			// cannot). Fail closed: a recipe whose ingredients don't fully resolve
+			// has an unknown allergen profile and must NOT be offered while an
+			// exclusion is active (Load() guarantees this for the embedded book;
+			// this defends a hand-built Book too).
 			if !b.resolves(r) || excludes(b.recipeAllergens(r), exclude) {
 				continue
 			}
@@ -408,6 +428,16 @@ func Split(m foods.Macros, share float64) foods.Macros {
 		SodiumMg:   round1(m.SodiumMg * share),
 		CaffeineMg: round1(m.CaffeineMg * share),
 	}
+}
+
+// containsAllWords reports whether every word appears somewhere in hay.
+func containsAllWords(hay string, words []string) bool {
+	for _, w := range words {
+		if !strings.Contains(hay, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // recipeAllergens returns just the derived allergen set for a recipe.

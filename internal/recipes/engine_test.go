@@ -186,19 +186,35 @@ func TestInSeason(t *testing.T) {
 }
 
 func TestSuggestExcludesAllergenHard(t *testing.T) {
-	b := book(t)
+	// A NON-personal recipe carrying lactose must be hard-excluded; a lactose-free
+	// one stays. (Personal recipes are exempt - covered by a separate test.)
+	lact := Ingredient{Food: "mozzarella", Qta: 100, Unita: "g"} // milk + lactose
+	safe := Ingredient{Food: "pasta_secca", Qta: 100, Unita: "g"}
+	b := rawBook(
+		Recipe{ID: "con-lattosio", Categoria: "primo", Ingredienti: []Ingredient{lact}},
+		Recipe{ID: "senza-lattosio", Categoria: "primo", Ingredienti: []Ingredient{safe}},
+	)
 	out := b.Suggest(SuggestFilter{ExcludeAllergens: []string{"lactose"}})
-	if len(out) == 0 {
-		t.Fatal("Suggest returned no recipes")
+	if indexOf(out, "con-lattosio") >= 0 {
+		t.Error("non-personal lactose recipe should be excluded")
 	}
-	for _, r := range out {
-		allergens := b.recipeAllergens(r)
-		if contains(allergens, "lactose") {
-			t.Errorf("recipe %q has lactose but was not excluded", r.ID)
-		}
-		if r.ID == "colazione-avena-chia-yogurt" {
-			t.Error("lactose recipe colazione-avena-chia-yogurt should be excluded")
-		}
+	if indexOf(out, "senza-lattosio") < 0 {
+		t.Error("lactose-free recipe should be included")
+	}
+}
+
+func TestSuggestByNameFindsDishAndBypassesExclusion(t *testing.T) {
+	// By-name lookup finds a dish anywhere in the book and is NOT hidden by the
+	// family allergen exclusion (the athlete asked for it by name).
+	b := book(t)
+	out := b.Suggest(SuggestFilter{Query: "riso cantonese", ExcludeAllergens: []string{"lactose"}, Season: "estate"})
+	if indexOf(out, "riso-cantonese") < 0 {
+		t.Errorf("by-name query should find riso-cantonese: %v", ids(out))
+	}
+	lact := Ingredient{Food: "mozzarella", Qta: 100, Unita: "g"}
+	rb := rawBook(Recipe{ID: "parmigiana", Nome: "Parmigiana di melanzane", Categoria: "secondo", Ingredienti: []Ingredient{lact}})
+	if got := rb.Suggest(SuggestFilter{Query: "parmigiana", ExcludeAllergens: []string{"lactose"}}); indexOf(got, "parmigiana") < 0 {
+		t.Errorf("by-name query should surface a lactose dish by explicit name: %v", ids(got))
 	}
 }
 
@@ -381,5 +397,20 @@ func TestSuggestFailsClosedOnUnresolvedIngredient(t *testing.T) {
 	// With no exclusion active it may appear (no safety claim to uphold).
 	if open := b.Suggest(SuggestFilter{}); len(open) != 1 {
 		t.Errorf("without exclusion the recipe should pass: got %d", len(open))
+	}
+}
+
+func TestSuggestPersonalBypassesFamilyAllergen(t *testing.T) {
+	lact := Ingredient{Food: "yogurt_greco_0", Qta: 100, Unita: "g"} // milk + lactose
+	b := rawBook(
+		Recipe{ID: "mia-colazione", Categoria: "colazione", Personale: true, Ingredienti: []Ingredient{lact}},
+		Recipe{ID: "colazione-famiglia", Categoria: "colazione", Ingredienti: []Ingredient{lact}},
+	)
+	out := b.Suggest(SuggestFilter{ExcludeAllergens: []string{"lactose"}})
+	if indexOf(out, "mia-colazione") < 0 {
+		t.Error("personal lactose recipe should be suggested despite the family exclusion")
+	}
+	if indexOf(out, "colazione-famiglia") >= 0 {
+		t.Error("non-personal lactose recipe must still be excluded")
 	}
 }
