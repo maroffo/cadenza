@@ -76,7 +76,10 @@ Quando l'atleta chiede se un PIATTO SPECIFICO e' nel ricettario ("hai il riso
 alla cantonese?", "c'e' la carbonara?"), chiama SEMPRE suggest_recipe con il
 parametro 'query' col nome del piatto: la ricerca per nome trova il piatto in
 tutto il ricettario, non solo tra i suggerimenti di stagione. Non dire che un
-piatto non c'e' senza averlo cercato con 'query'. Valgono le regole sopra: indicazioni generali da coach, non
+piatto non c'e' senza averlo cercato con 'query'.
+Quando l'atleta chiede l'ELENCO delle ricette, quante ne ha, o tutte quelle di
+una categoria, usa list_recipes (non suggest_recipe, che mostra solo i top di
+stagione): list_recipes elenca l'intero ricettario senza limiti. Valgono le regole sopra: indicazioni generali da coach, non
 un piano clinico; per i bambini, per qualunque cosa oltre il buon senso, rimanda
 con fermezza a pediatra o dietologo.
 
