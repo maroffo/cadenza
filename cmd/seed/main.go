@@ -37,11 +37,24 @@ func main() {
 	lookbackDays := flag.Int("lookback", 60, "wellness history window for baselines")
 	dryRun := flag.Bool("dry-run", false, "compute and print, write nothing")
 	seedRecipes := flag.Bool("recipes", false, "seed the family recipe book (recipes+meals) from the embedded YAML into Firestore, then exit")
+	seedFamily := flag.Bool("family", false, "seed the family energy profile from a YAML (-f, default family.yaml) into Firestore, then exit")
 	flag.Parse()
 
 	if *seedRecipes {
 		if err := runRecipes(context.Background(), *dryRun); err != nil {
 			slog.Error("seed recipes", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if *seedFamily {
+		path := *yamlPath
+		if path == "athlete.yaml" { // default belongs to the profile seed; family has its own
+			path = "family.yaml"
+		}
+		if err := runFamily(context.Background(), path, *dryRun); err != nil {
+			slog.Error("seed family", "err", err)
 			os.Exit(1)
 		}
 		return
@@ -161,6 +174,55 @@ func run(ctx context.Context, yamlPath string, lookbackDays int, dryRun bool) er
 		return fmt.Errorf("write profile/identity: %w", err)
 	}
 	slog.Info("profile seeded", "sports", seed.Sports, "races", len(seed.Races), "zones", len(zones))
+	return nil
+}
+
+// runFamily reads the family energy profile from YAML and writes it to
+// Firestore (profile/family), the one-off migration behind the meal_targets
+// tool. It validates the distribution sums ~100 and every member has positive
+// kcal before writing, so a broken YAML never half-seeds. Idempotent.
+func runFamily(ctx context.Context, yamlPath string, dryRun bool) error {
+	raw, err := os.ReadFile(yamlPath)
+	if err != nil {
+		return fmt.Errorf("family file: %w", err)
+	}
+	var fam store.Family
+	if err := yaml.Unmarshal(raw, &fam); err != nil {
+		return fmt.Errorf("family yaml: %w", err)
+	}
+	if len(fam.Membri) == 0 {
+		return fmt.Errorf("family yaml: nessun membro")
+	}
+	var sum float64
+	for _, v := range fam.Distribuzione {
+		sum += v
+	}
+	if sum < 95 || sum > 105 {
+		return fmt.Errorf("family yaml: la distribuzione somma %.0f%%, deve essere ~100", sum)
+	}
+	for _, m := range fam.Membri {
+		if m.KcalCaldo <= 0 || m.KcalFreddo <= 0 {
+			return fmt.Errorf("family yaml: %q ha kcal non valide (caldo %.0f, freddo %.0f)", m.Nome, m.KcalCaldo, m.KcalFreddo)
+		}
+	}
+	slog.Info("family seed prepared", "membri", len(fam.Membri), "pasti", len(fam.Distribuzione), "dry_run", dryRun)
+	if dryRun {
+		return nil
+	}
+
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
+	}
+	fsClient, err := store.NewClient(ctx, cfg.GCPProject)
+	if err != nil {
+		return fmt.Errorf("firestore: %w", err)
+	}
+	defer func() { _ = fsClient.Close() }()
+	if err := store.NewProfiles(fsClient).SeedFamily(ctx, fam); err != nil {
+		return fmt.Errorf("write profile/family: %w", err)
+	}
+	slog.Info("family profile seeded to firestore", "membri", len(fam.Membri))
 	return nil
 }
 

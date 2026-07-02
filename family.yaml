@@ -1,0 +1,35 @@
+# ABOUTME: Family energy profile (per-person daily kcal + per-meal distribution) for meal targets.
+# ABOUTME: Evidence-based, editable; seeded to Firestore profile/family via `go run ./cmd/seed -family`.
+
+# kcal_caldo  = primavera/estate ; kcal_freddo = autunno/inverno.
+# For adults the two are equal (no seasonal swing). For the children they differ:
+# Max reported "leggermente attivi d'estate, attivi d'inverno".
+
+distribuzione: # % del fabbisogno giornaliero per pasto (somma ~100)
+  colazione: 20
+  spuntino_mattina: 5
+  pranzo: 35
+  spuntino_pomeriggio: 10
+  cena: 30
+
+membri:
+  - nome: Max
+    ruolo: atleta
+    kcal_caldo: 2000
+    kcal_freddo: 2000
+    nota: "baseline giorni senza allenamento (dato dell'atleta); fueling allenamento gestito a parte col coach"
+  - nome: Angela
+    ruolo: adulto
+    kcal_caldo: 1600
+    kcal_freddo: 1600
+    nota: "Mifflin-St Jeor 47a 160cm 55kg (BMR 1154) x PAL 1.4 sedentaria"
+  - nome: Figlia
+    ruolo: bambino
+    kcal_caldo: 2050
+    kcal_freddo: 2300
+    nota: "13a, Schofield su peso di riferimento ~45kg (BMR 1295); PAL 1.6 estate / 1.8 inverno (LARN 2014 / EFSA 2013). Peso di riferimento: aggiornare col reale."
+  - nome: Figlio
+    ruolo: bambino
+    kcal_caldo: 1850
+    kcal_freddo: 2050
+    nota: "9a, Schofield su peso di riferimento ~29kg (BMR 1153); PAL 1.6 estate / 1.8 inverno (LARN 2014 / EFSA 2013). Peso di riferimento: aggiornare col reale."

@@ -310,6 +310,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Catalog:              exCatalog,
 			Foods:                foodsCat,
 			Recipes:              recipeProvider,
+			Family:               store.NewProfiles(fsClient),
 			MealExcludeAllergens: cfg.MealExcludeAllergens,
 			MediaCache:           store.NewMediaCache(fsClient),
 			Animator:             sender,
