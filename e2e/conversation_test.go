@@ -180,11 +180,14 @@ func TestConversation_EndToEnd(t *testing.T) {
 			updateID, text, userID, userID)
 	}
 
-	// 1) First free-text message: coach replies with verdict footer.
+	// 1) First free-text message: coach replies WITHOUT the verdict footer
+	// (that block is morning-only now; the verdict still reaches the model).
 	post(msg(8001, "come sto messo oggi?"))
-	if len(sink.texts) != 1 || !strings.Contains(sink.texts[0], "Sei fresco") ||
-		!strings.Contains(sink.texts[0], "VERDETTO") {
+	if len(sink.texts) != 1 || !strings.Contains(sink.texts[0], "Sei fresco") {
 		t.Fatalf("first reply wrong: %v", sink.texts)
+	}
+	if strings.Contains(sink.texts[0], "VERDETTO") {
+		t.Fatalf("conversational reply leaked the verdict footer: %v", sink.texts)
 	}
 
 	// 2) Second message: history replayed, cache breakpoint stable.
