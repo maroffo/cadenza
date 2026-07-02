@@ -136,8 +136,11 @@ type Coach struct {
 	Catalog *exercises.Catalog
 	// Foods enables the lookup_food tool for grounded fueling/nutrition numbers (nil hides it).
 	Foods *foods.Catalog
-	// Recipes enables the suggest_recipe tool over the family meal book (nil hides it).
-	Recipes *recipes.Book
+	// Recipes enables the suggest_recipe/list_recipes tools over the family meal
+	// book (nil hides both). It is a provider, not a static book: the Firestore-
+	// backed impl yields the LIVE book (dashboard edits included); a *recipes.Book
+	// also satisfies it for tests.
+	Recipes recipes.BookProvider
 	// MealExcludeAllergens are the family's HARD allergen exclusions for meal suggestions.
 	MealExcludeAllergens []string
 	// MediaCache caches Telegram file_ids for demo GIFs (nil = always fetch from source).
@@ -642,8 +645,8 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 				"Usalo quando l'atleta chiede l'elenco completo, quante ricette ci sono, o " +
 				"tutte quelle di una categoria. 'categoria' opzionale per restringere.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"categoria":{"type":"string"}}}`),
-			Handler: func(_ context.Context, _ string, input json.RawMessage) (string, error) {
-				return c.listRecipes(input)
+			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
+				return c.listRecipes(ctx, input)
 			},
 		}
 		t["suggest_recipe"] = agent.Tool{
@@ -655,8 +658,8 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 				"chiede se un piatto specifico e' nel ricettario. 'categoria' opzionale: " +
 				"colazione|primo|secondo|contorno|piatto-unico|zuppa|merenda|dolce.",
 			Schema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"categoria":{"type":"string"}}}`),
-			Handler: func(_ context.Context, _ string, input json.RawMessage) (string, error) {
-				return c.suggestRecipe(input)
+			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
+				return c.suggestRecipe(ctx, input)
 			},
 		}
 	}
@@ -695,7 +698,12 @@ func searchExercisesDesc(cat *exercises.Catalog) string {
 // categoria + stagioni + allergeni, no season narrowing and no limit. For "dammi
 // l'elenco" / "quante ricette ho": suggest_recipe caps and season-ranks, so it is
 // the wrong tool for a full listing.
-func (c *Coach) listRecipes(input json.RawMessage) (string, error) {
+func (c *Coach) listRecipes(ctx context.Context, input json.RawMessage) (string, error) {
+	book, err := c.Recipes.Book(ctx)
+	if err != nil {
+		slog.Warn("coach: recipe book unavailable", "err", err)
+		return "Il ricettario non è raggiungibile in questo momento, riprova tra poco.", nil
+	}
 	var in struct {
 		Categoria string `json:"categoria"`
 	}
@@ -708,11 +716,11 @@ func (c *Coach) listRecipes(input json.RawMessage) (string, error) {
 		Allergeni []string `json:"allergeni,omitempty"`
 	}
 	var list []item
-	for _, r := range c.Recipes.Recipes() {
+	for _, r := range book.Recipes() {
 		if in.Categoria != "" && r.Categoria != in.Categoria {
 			continue
 		}
-		_, al := c.Recipes.RecipePerServing(r)
+		_, al := book.RecipePerServing(r)
 		list = append(list, item{ID: r.ID, Nome: r.Nome, Categoria: r.Categoria, Stagioni: r.Stagioni, Allergeni: al})
 	}
 	if len(list) == 0 {
@@ -725,14 +733,19 @@ func (c *Coach) listRecipes(input json.RawMessage) (string, error) {
 // suggestRecipe returns season-ranked, allergen-filtered recipes from the family
 // book with per-serving macros. The hard allergen exclusion (e.g. lactose) and
 // the seasonal ordering happen in the engine, not at the model's discretion.
-func (c *Coach) suggestRecipe(input json.RawMessage) (string, error) {
+func (c *Coach) suggestRecipe(ctx context.Context, input json.RawMessage) (string, error) {
+	book, err := c.Recipes.Book(ctx)
+	if err != nil {
+		slog.Warn("coach: recipe book unavailable", "err", err)
+		return "Il ricettario non è raggiungibile in questo momento, riprova tra poco.", nil
+	}
 	var in struct {
 		Categoria string `json:"categoria"`
 		Query     string `json:"query"`
 	}
 	_ = json.Unmarshal(input, &in) // both optional; ignore decode errors
 	season := recipes.Season(c.Now().In(c.TZ))
-	res := c.Recipes.Suggest(recipes.SuggestFilter{
+	res := book.Suggest(recipes.SuggestFilter{
 		Categoria:        in.Categoria,
 		Query:            in.Query,
 		ExcludeAllergens: c.MealExcludeAllergens,
@@ -756,7 +769,7 @@ func (c *Coach) suggestRecipe(input json.RawMessage) (string, error) {
 	}
 	list := make([]item, 0, len(res))
 	for _, r := range res {
-		m, al := c.Recipes.RecipePerServing(r)
+		m, al := book.RecipePerServing(r)
 		list = append(list, item{
 			ID: r.ID, Nome: r.Nome, Categoria: r.Categoria,
 			DiStagione: recipes.InSeason(r, season), Allergeni: al,

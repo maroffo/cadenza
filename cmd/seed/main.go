@@ -14,8 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/maroffo/cadenza/internal/config"
+	"github.com/maroffo/cadenza/internal/foods"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/job"
+	"github.com/maroffo/cadenza/internal/recipes"
 	"github.com/maroffo/cadenza/internal/store"
 )
 
@@ -34,12 +36,58 @@ func main() {
 	yamlPath := flag.String("f", "athlete.yaml", "athlete seed YAML")
 	lookbackDays := flag.Int("lookback", 60, "wellness history window for baselines")
 	dryRun := flag.Bool("dry-run", false, "compute and print, write nothing")
+	seedRecipes := flag.Bool("recipes", false, "seed the family recipe book (recipes+meals) from the embedded YAML into Firestore, then exit")
 	flag.Parse()
+
+	if *seedRecipes {
+		if err := runRecipes(context.Background(), *dryRun); err != nil {
+			slog.Error("seed recipes", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if err := run(context.Background(), *yamlPath, *lookbackDays, *dryRun); err != nil {
 		slog.Error("seed", "err", err)
 		os.Exit(1)
 	}
+}
+
+// runRecipes writes the curated embedded recipe book into Firestore, the one-off
+// migration behind the runtime-mutable recipe dashboard. It strict-loads the
+// embed first (a dirty book aborts before any write), so a broken YAML never
+// half-seeds. Idempotent: re-running overwrites each doc by id.
+func runRecipes(ctx context.Context, dryRun bool) error {
+	book := recipes.MustLoad(foods.MustLoad()) // strict: embed must be clean
+	rs, ms := book.Recipes(), book.Meals()
+	slog.Info("recipe seed prepared", "recipes", len(rs), "meals", len(ms), "dry_run", dryRun)
+	if dryRun {
+		return nil
+	}
+
+	cfg, err := config.Load(os.Getenv)
+	if err != nil {
+		return err
+	}
+	fsClient, err := store.NewClient(ctx, cfg.GCPProject)
+	if err != nil {
+		return fmt.Errorf("firestore: %w", err)
+	}
+	defer func() { _ = fsClient.Close() }()
+
+	rstore := store.NewRecipes(fsClient)
+	for _, r := range rs {
+		if err := rstore.SaveRecipe(ctx, r); err != nil {
+			return fmt.Errorf("seed recipe %q: %w", r.ID, err)
+		}
+	}
+	for _, m := range ms {
+		if err := rstore.SaveMeal(ctx, m); err != nil {
+			return fmt.Errorf("seed meal %q: %w", m.ID, err)
+		}
+	}
+	slog.Info("recipe book seeded to firestore", "recipes", len(rs), "meals", len(ms))
+	return nil
 }
 
 func run(ctx context.Context, yamlPath string, lookbackDays int, dryRun bool) error {
