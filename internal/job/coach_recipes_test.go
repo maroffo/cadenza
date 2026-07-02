@@ -20,21 +20,15 @@ func recipeBook(t *testing.T) *recipes.Book {
 	return recipes.MustLoad(foods.MustLoad())
 }
 
-func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
-	c := &Coach{
-		Recipes:              recipeBook(t),
-		MealExcludeAllergens: []string{"lactose"},
-		Now:                  fixedNow,
-		TZ:                   testTZ,
-	}
-	reply, err := c.suggestRecipe([]byte(`{}`))
-	if err != nil {
-		t.Fatalf("suggestRecipe: %v", err)
-	}
+func parseSuggest(t *testing.T, reply string) []struct {
+	ID          string             `json:"id"`
+	Allergeni   []string           `json:"allergeni"`
+	PerPorzione map[string]float64 `json:"per_porzione"`
+} {
+	t.Helper()
 	i := strings.Index(reply, "{")
 	var out struct {
-		Stagione string `json:"stagione"`
-		Ricette  []struct {
+		Ricette []struct {
 			ID          string             `json:"id"`
 			Allergeni   []string           `json:"allergeni"`
 			PerPorzione map[string]float64 `json:"per_porzione"`
@@ -43,22 +37,47 @@ func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
 	if err := json.Unmarshal([]byte(reply[i:]), &out); err != nil {
 		t.Fatalf("bad JSON: %v\n%s", err, reply)
 	}
-	if len(out.Ricette) == 0 {
-		t.Fatal("no recipes suggested")
+	return out.Ricette
+}
+
+func TestSuggestRecipe_ExcludesLactoseHard(t *testing.T) {
+	c := &Coach{
+		Recipes:              recipeBook(t),
+		MealExcludeAllergens: []string{"lactose"},
+		Now:                  fixedNow,
+		TZ:                   testTZ,
 	}
-	for _, r := range out.Ricette {
+	// FAMILY meals (a shared course) must never carry lactose.
+	reply, err := c.suggestRecipe([]byte(`{"categoria":"primo"}`))
+	if err != nil {
+		t.Fatalf("suggestRecipe: %v", err)
+	}
+	rs := parseSuggest(t, reply)
+	if len(rs) == 0 {
+		t.Fatal("no family primi suggested")
+	}
+	for _, r := range rs {
 		for _, a := range r.Allergeni {
 			if a == "lactose" {
-				t.Errorf("recipe %s with lactose was suggested despite the family exclusion", r.ID)
+				t.Errorf("family recipe %s leaked lactose despite the exclusion", r.ID)
 			}
-		}
-		// The breakfast (yogurt) carries lactose and must be filtered out.
-		if r.ID == "colazione-avena-chia-yogurt" {
-			t.Error("lactose breakfast leaked into suggestions")
 		}
 		if r.PerPorzione["kcal"] <= 0 {
 			t.Errorf("recipe %s has no per-serving kcal", r.ID)
 		}
+	}
+
+	// The athlete's PERSONAL breakfast (lactose) is exempt from the family
+	// exclusion and must still be offered when he asks for it.
+	repC, _ := c.suggestRecipe([]byte(`{"categoria":"colazione"}`))
+	found := false
+	for _, r := range parseSuggest(t, repC) {
+		if r.ID == "colazione-avena-chia-yogurt" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("personal lactose breakfast should be suggested to the athlete, not filtered out")
 	}
 }
 

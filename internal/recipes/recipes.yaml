@@ -47,6 +47,7 @@ ricette:
     categoria: colazione
     porzioni: 1
     tag: [veloce, proteica]
+    personale: true
     ingredienti:
       - food: avena
         qta: 30

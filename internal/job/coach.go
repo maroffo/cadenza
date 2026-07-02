@@ -634,11 +634,14 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 	}
 	if c.Recipes != nil {
 		t["suggest_recipe"] = agent.Tool{
-			Description: "Proponi ricette dal ricettario di FAMIGLIA (per i pasti, '" +
-				"non so cosa cucinare'). Sono GIA' filtrate per gli allergeni di famiglia " +
-				"(le non adatte sono escluse) e ordinate per stagione corrente. 'categoria' " +
-				"opzionale: colazione|primo|secondo|contorno|piatto-unico|merenda|dolce.",
-			Schema: json.RawMessage(`{"type":"object","properties":{"categoria":{"type":"string"}}}`),
+			Description: "Cerca/consulta il ricettario di FAMIGLIA. Due usi: (1) senza " +
+				"'query' propone piatti per stagione, gia' filtrati per gli allergeni di " +
+				"famiglia (per 'non so cosa cucinare'); (2) con 'query' cerca un piatto per " +
+				"NOME (es. 'riso alla cantonese', 'carbonara') e lo restituisce se c'e', " +
+				"comunque, mostrandone gli allergeni. Usa SEMPRE 'query' quando l'atleta " +
+				"chiede se un piatto specifico e' nel ricettario. 'categoria' opzionale: " +
+				"colazione|primo|secondo|contorno|piatto-unico|zuppa|merenda|dolce.",
+			Schema: json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"},"categoria":{"type":"string"}}}`),
 			Handler: func(_ context.Context, _ string, input json.RawMessage) (string, error) {
 				return c.suggestRecipe(input)
 			},
@@ -681,16 +684,21 @@ func searchExercisesDesc(cat *exercises.Catalog) string {
 func (c *Coach) suggestRecipe(input json.RawMessage) (string, error) {
 	var in struct {
 		Categoria string `json:"categoria"`
+		Query     string `json:"query"`
 	}
-	_ = json.Unmarshal(input, &in) // categoria is optional; ignore decode errors
+	_ = json.Unmarshal(input, &in) // both optional; ignore decode errors
 	season := recipes.Season(c.Now().In(c.TZ))
 	res := c.Recipes.Suggest(recipes.SuggestFilter{
 		Categoria:        in.Categoria,
+		Query:            in.Query,
 		ExcludeAllergens: c.MealExcludeAllergens,
 		Season:           season,
-		Limit:            6,
+		Limit:            12,
 	})
 	if len(res) == 0 {
+		if strings.TrimSpace(in.Query) != "" {
+			return "Nel ricettario non c'è una ricetta che corrisponde a «" + in.Query + "».", nil
+		}
 		return "Nessuna ricetta adatta nel ricettario (stagione " + season +
 			", esclusi: " + strings.Join(c.MealExcludeAllergens, ", ") + ").", nil
 	}
