@@ -252,3 +252,14 @@ func sortedKeys(m map[string]bool) []string {
 func (c *Catalog) Len() int {
 	return len(c.foods)
 }
+
+// IDs returns every food id, sorted, for building input datalists (the recipe
+// dashboard references foods by id).
+func (c *Catalog) IDs() []string {
+	out := make([]string, 0, len(c.foods))
+	for _, f := range c.foods {
+		out = append(out, f.ID)
+	}
+	sort.Strings(out)
+	return out
+}
