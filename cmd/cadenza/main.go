@@ -185,6 +185,31 @@ func (a webAudit) RecordWebChange(ctx context.Context, kind, oldValue, newValue 
 	return a.muts.RecordWebChange(ctx, kind, oldValue, newValue)
 }
 
+// webRecipes bridges the recipe store + cached provider + food catalog to the
+// dashboard's RecipeAdmin: CRUD hits Firestore, Book/Invalidate go through the
+// provider so a dashboard edit is immediately live for the coach.
+type webRecipes struct {
+	store    *store.Recipes
+	provider *recipes.Provider
+	foods    *foods.Catalog
+}
+
+func (w webRecipes) ListRecipes(ctx context.Context) ([]recipes.Recipe, error) {
+	return w.store.ListRecipes(ctx)
+}
+func (w webRecipes) GetRecipe(ctx context.Context, id string) (*recipes.Recipe, error) {
+	return w.store.GetRecipe(ctx, id)
+}
+func (w webRecipes) SaveRecipe(ctx context.Context, r recipes.Recipe) error {
+	return w.store.SaveRecipe(ctx, r)
+}
+func (w webRecipes) DeleteRecipe(ctx context.Context, id string) error {
+	return w.store.DeleteRecipe(ctx, id)
+}
+func (w webRecipes) Book(ctx context.Context) (*recipes.Book, error) { return w.provider.Book(ctx) }
+func (w webRecipes) Invalidate()                                     { w.provider.Invalidate() }
+func (w webRecipes) FoodIDs() []string                               { return w.foods.IDs() }
+
 func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueuer) (job.Deps, *web.Server, error) {
 	tz, err := time.LoadLocation(cfg.AthleteTZ)
 	if err != nil {
@@ -211,6 +236,13 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 	injuries := store.NewInjuries(fsClient)
 	// One embedded catalog shared by the morning routine and the coach tool.
 	exCatalog := exercises.MustLoad()
+	// Recipes: one Firestore store + one cached provider shared by the coach
+	// (reads the live book) and the web dashboard (writes + Invalidate). The
+	// food catalog is embedded and needed by both paths, so it's hoisted here
+	// (the dashboard works even without an LLM key).
+	foodsCat := foods.MustLoad()
+	recipeStore := store.NewRecipes(fsClient)
+	recipeProvider := recipes.NewProvider(recipeStore, foodsCat)
 	injuryJob := job.InjuryJob{
 		Injuries: injuries, Out: sender, Keyboard: sender, Retry: retry,
 		Now: time.Now, TZ: tz,
@@ -256,7 +288,6 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 		morning.ModelName = cfg.ModelCheap
 
 		chats := store.NewChats(fsClient)
-		foodsCat := foods.MustLoad()
 		message.Coach = &job.Coach{
 			Agent:                agent.Coach{Client: llm, Model: cfg.ModelDeep},
 			Wellness:             job.ICU{C: icuClient},
@@ -278,7 +309,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Summary:              agent.Summarizer{Client: llm, Model: cfg.ModelCheap},
 			Catalog:              exCatalog,
 			Foods:                foodsCat,
-			Recipes:              recipes.NewProvider(store.NewRecipes(fsClient), foodsCat),
+			Recipes:              recipeProvider,
 			MealExcludeAllergens: cfg.MealExcludeAllergens,
 			MediaCache:           store.NewMediaCache(fsClient),
 			Animator:             sender,
@@ -322,8 +353,9 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 				muts:   store.NewMutations(fsClient),
 				budget: store.NewBudget(fsClient),
 			},
-			Now: time.Now,
-			TZ:  tz,
+			Recipes: webRecipes{store: recipeStore, provider: recipeProvider, foods: foodsCat},
+			Now:     time.Now,
+			TZ:      tz,
 		}
 		// Typed-nil trap: a nil *job.Coach in a non-nil interface panics on
 		// first use. Skeleton mode (no LLM) keeps Chat nil and the handler

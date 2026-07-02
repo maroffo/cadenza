@@ -86,8 +86,10 @@ type Server struct {
 	Rules    RuleAdmin
 	Profiles ProfileAdmin
 	Audit    AuditSource
-	Now      func() time.Time
-	TZ       *time.Location
+	// Recipes powers the recipe dashboard (nil hides the pages/routes).
+	Recipes RecipeAdmin
+	Now     func() time.Time
+	TZ      *time.Location
 }
 
 // Register mounts all dashboard routes on the mux.
@@ -106,6 +108,17 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/profile/rampcap", s.Auth.Require(s.setRampCap))
 	mux.HandleFunc("GET /app/chat", s.Auth.Require(s.chat))
 	mux.HandleFunc("POST /app/chat", s.Auth.Require(s.chatSend))
+	if s.Recipes != nil {
+		// Static segments (/add) are registered alongside the {id} pattern; Go's
+		// ServeMux prefers the more specific path, so /app/recipes/add wins.
+		mux.HandleFunc("GET /app/recipes", s.Auth.Require(s.recipesList))
+		mux.HandleFunc("GET /app/recipes/add", s.Auth.Require(s.recipeAddForm))
+		mux.HandleFunc("POST /app/recipes", s.Auth.Require(s.recipeCreate))
+		mux.HandleFunc("GET /app/recipes/{id}", s.Auth.Require(s.recipeView))
+		mux.HandleFunc("GET /app/recipes/{id}/edit", s.Auth.Require(s.recipeEditForm))
+		mux.HandleFunc("POST /app/recipes/{id}", s.Auth.Require(s.recipeUpdate))
+		mux.HandleFunc("POST /app/recipes/{id}/delete", s.Auth.Require(s.recipeDelete))
+	}
 	mux.HandleFunc("POST /app/logout", s.Auth.HandleLogout)
 }
 

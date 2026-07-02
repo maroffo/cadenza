@@ -347,6 +347,38 @@ func (b *Book) MealTotals(m Meal) (foods.Macros, []string, []string) {
 	return Split(tot, 1), sortedKeys(allergenSet), flags
 }
 
+// ValidateRecipe returns human-readable problems with a recipe's ingredients:
+// an empty ingredient list, unknown foods, unknown units, or a countable unit
+// (pz) on a food without unit_grams. Empty means the recipe is safe to store —
+// its macros and, crucially, its allergens fully derive (write-time fail-closed
+// so the dashboard can never persist a recipe whose lactose tag we'd miss).
+func (b *Book) ValidateRecipe(r Recipe) []string {
+	var problems []string
+	if len(r.Ingredienti) == 0 {
+		problems = append(problems, "la ricetta non ha ingredienti")
+	}
+	for _, ing := range r.Ingredienti {
+		if _, ok := b.cat.ByID(ing.Food); !ok {
+			problems = append(problems, fmt.Sprintf("alimento sconosciuto: %q", ing.Food))
+			continue
+		}
+		if _, err := b.grams(ing); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
+	return problems
+}
+
+// Units lists the accepted ingredient units (the built-ins plus the misure
+// table keys), sorted, for the dashboard form hint.
+func (b *Book) Units() []string {
+	set := map[string]bool{"g": true, "ml": true, "pz": true, "qb": true}
+	for k := range b.misure {
+		set[k] = true
+	}
+	return sortedKeys(set)
+}
+
 // ByID returns the recipe with the given id and whether it exists.
 func (b *Book) ByID(id string) (Recipe, bool) {
 	r, ok := b.recipesByID[id]

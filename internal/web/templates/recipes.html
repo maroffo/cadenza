@@ -1,0 +1,13 @@
+{{template "head" .}}
+<h2>Ricette di famiglia</h2>
+<p><a href="/app/recipes/add">➕ Aggiungi ricetta</a></p>
+<table><tr><th>Nome</th><th>Categoria</th><th>Stagioni</th><th>Personale</th><th></th></tr>
+{{range .Recipes}}<tr>
+<td><a href="/app/recipes/{{.ID}}">{{.Nome}}</a></td>
+<td>{{.Categoria}}</td>
+<td>{{if .Stagioni}}{{range $i, $s := .Stagioni}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}tutto l'anno{{end}}</td>
+<td>{{if .Personale}}sì{{else}}—{{end}}</td>
+<td><a href="/app/recipes/{{.ID}}/edit">✏️</a></td>
+</tr>{{else}}<tr><td colspan="5"><small>Nessuna ricetta nel ricettario.</small></td></tr>{{end}}
+</table>
+{{template "foot" .}}

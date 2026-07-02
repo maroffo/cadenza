@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maroffo/cadenza/internal/foods"
+	"github.com/maroffo/cadenza/internal/recipes"
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/verdict"
 )
@@ -86,6 +88,47 @@ func (stubHistory) ActiveTurns(context.Context, int) ([]store.Turn, error) {
 	}, nil
 }
 
+// stubRecipeAdmin is an in-memory RecipeAdmin whose Book() is the real embedded
+// book, so macro derivation and write-time validation run for real in tests.
+type stubRecipeAdmin struct {
+	book        *recipes.Book
+	stored      map[string]recipes.Recipe
+	saved       []recipes.Recipe
+	deleted     []string
+	invalidated int
+}
+
+func newStubRecipeAdmin() *stubRecipeAdmin {
+	return &stubRecipeAdmin{book: recipes.MustLoad(foods.MustLoad()), stored: map[string]recipes.Recipe{}}
+}
+
+func (s *stubRecipeAdmin) ListRecipes(context.Context) ([]recipes.Recipe, error) {
+	out := make([]recipes.Recipe, 0, len(s.stored))
+	for _, r := range s.stored {
+		out = append(out, r)
+	}
+	return out, nil
+}
+func (s *stubRecipeAdmin) GetRecipe(_ context.Context, id string) (*recipes.Recipe, error) {
+	if r, ok := s.stored[id]; ok {
+		return &r, nil
+	}
+	return nil, nil
+}
+func (s *stubRecipeAdmin) SaveRecipe(_ context.Context, r recipes.Recipe) error {
+	s.saved = append(s.saved, r)
+	s.stored[r.ID] = r
+	return nil
+}
+func (s *stubRecipeAdmin) DeleteRecipe(_ context.Context, id string) error {
+	s.deleted = append(s.deleted, id)
+	delete(s.stored, id)
+	return nil
+}
+func (s *stubRecipeAdmin) Book(context.Context) (*recipes.Book, error) { return s.book, nil }
+func (s *stubRecipeAdmin) Invalidate()                                 { s.invalidated++ }
+func (s *stubRecipeAdmin) FoodIDs() []string                           { return []string{"banana", "pasta_secca"} }
+
 func testServer() (*Server, *stubChat, *stubInjAdmin, *stubRuleAdmin, *stubProfileAdmin, *memSessions) {
 	auth, sess := testAuth()
 	chat := &stubChat{}
@@ -95,8 +138,9 @@ func testServer() (*Server, *stubChat, *stubInjAdmin, *stubRuleAdmin, *stubProfi
 	return &Server{
 		Auth: auth, Status: stubStatus{}, Chat: chat, History: stubHistory{},
 		Injuries: inj, Rules: rules, Profiles: prof, Audit: &stubAudit{},
-		Now: func() time.Time { return time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC) },
-		TZ:  time.UTC,
+		Recipes: newStubRecipeAdmin(),
+		Now:     func() time.Time { return time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC) },
+		TZ:      time.UTC,
 	}, chat, inj, rules, prof, sess
 }
 
@@ -274,6 +318,9 @@ func TestWeb_AllRoutesRequireAuth(t *testing.T) {
 		{"GET", "/app/injuries"}, {"GET", "/app/chat"},
 		{"POST", "/app/injuries/resolve"}, {"POST", "/app/rules/deactivate"},
 		{"POST", "/app/profile/rampcap"}, {"POST", "/app/chat"},
+		{"GET", "/app/recipes"}, {"GET", "/app/recipes/add"}, {"POST", "/app/recipes"},
+		{"GET", "/app/recipes/r1"}, {"GET", "/app/recipes/r1/edit"},
+		{"POST", "/app/recipes/r1"}, {"POST", "/app/recipes/r1/delete"},
 	}
 	for _, rt := range routes {
 		rec := httptest.NewRecorder()
@@ -395,5 +442,118 @@ func TestWeb_CrossSiteFetchRejected(t *testing.T) {
 	mux.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("cross-site POST = %d, want 403", rec.Code)
+	}
+}
+
+func TestWeb_RecipesListAndForms(t *testing.T) {
+	s, _, _, _, _, sess := testServer()
+	ra := s.Recipes.(*stubRecipeAdmin)
+	ra.stored["pasta-tonno"] = recipes.Recipe{ID: "pasta-tonno", Nome: "Pasta al tonno",
+		Categoria: "primo", Porzioni: 2,
+		Ingredienti: []recipes.Ingredient{{Food: "pasta_secca", Qta: 200, Unita: "g"}}}
+
+	if rec := authedRequest(t, s, sess, http.MethodGet, "/app/recipes", nil); rec.Code != 200 ||
+		!strings.Contains(rec.Body.String(), "Pasta al tonno") {
+		t.Fatalf("list = %d, body missing recipe:\n%s", rec.Code, rec.Body.String())
+	}
+	if rec := authedRequest(t, s, sess, http.MethodGet, "/app/recipes/add", nil); rec.Code != 200 ||
+		!strings.Contains(rec.Body.String(), "Nuova ricetta") {
+		t.Fatalf("add form = %d", rec.Code)
+	}
+	// View derives macros + shows the ingredient.
+	if rec := authedRequest(t, s, sess, http.MethodGet, "/app/recipes/pasta-tonno", nil); rec.Code != 200 ||
+		!strings.Contains(rec.Body.String(), "pasta_secca") || !strings.Contains(rec.Body.String(), "kcal") {
+		t.Fatalf("view = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	// Edit form prefills the ingredient textarea.
+	if rec := authedRequest(t, s, sess, http.MethodGet, "/app/recipes/pasta-tonno/edit", nil); rec.Code != 200 ||
+		!strings.Contains(rec.Body.String(), "pasta_secca | 200 | g") {
+		t.Fatalf("edit form = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	// Missing recipe is a 404, not a panic.
+	if rec := authedRequest(t, s, sess, http.MethodGet, "/app/recipes/ghost", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing recipe = %d, want 404", rec.Code)
+	}
+}
+
+func TestWeb_RecipeCreateValidPersistsAndInvalidates(t *testing.T) {
+	s, _, _, _, _, sess := testServer()
+	ra := s.Recipes.(*stubRecipeAdmin)
+	audit := s.Audit.(*stubAudit)
+	rec := authedRequest(t, s, sess, http.MethodPost, "/app/recipes", url.Values{
+		"id": {"pasta-tonno"}, "nome": {"Pasta al tonno"}, "categoria": {"primo"},
+		"porzioni":    {"2"},
+		"ingredienti": {"pasta_secca | 200 | g\nbanana | 1 | pz"},
+	})
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("create = %d, want 303:\n%s", rec.Code, rec.Body.String())
+	}
+	if len(ra.saved) != 1 || ra.saved[0].ID != "pasta-tonno" || len(ra.saved[0].Ingredienti) != 2 {
+		t.Fatalf("recipe not persisted correctly: %+v", ra.saved)
+	}
+	if ra.invalidated == 0 {
+		t.Error("provider cache not invalidated after write (coach would not see the edit)")
+	}
+	if len(audit.webChanges) != 1 {
+		t.Errorf("no audit event for the recipe write (D14): %v", audit.webChanges)
+	}
+}
+
+func TestWeb_RecipeCreateRejectsUnknownFood(t *testing.T) {
+	s, _, _, _, _, sess := testServer()
+	ra := s.Recipes.(*stubRecipeAdmin)
+	rec := authedRequest(t, s, sess, http.MethodPost, "/app/recipes", url.Values{
+		"id": {"cattiva"}, "nome": {"Cattiva"}, "categoria": {"primo"},
+		"porzioni":    {"1"},
+		"ingredienti": {"non_esiste | 100 | g"},
+	})
+	// Re-render (200) with the error, and NOTHING saved: fail-closed on allergens.
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "alimento sconosciuto") {
+		t.Fatalf("unknown food = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	if len(ra.saved) != 0 {
+		t.Fatalf("a recipe with an unresolved ingredient was persisted: %+v", ra.saved)
+	}
+}
+
+func TestWeb_RecipeCreateRejectsBadID(t *testing.T) {
+	s, _, _, _, _, sess := testServer()
+	ra := s.Recipes.(*stubRecipeAdmin)
+	rec := authedRequest(t, s, sess, http.MethodPost, "/app/recipes", url.Values{
+		"id": {"Bad ID!"}, "nome": {"x"}, "categoria": {"primo"}, "porzioni": {"1"},
+		"ingredienti": {"banana | 1 | pz"},
+	})
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "id non valido") {
+		t.Fatalf("bad id = %d, body:\n%s", rec.Code, rec.Body.String())
+	}
+	if len(ra.saved) != 0 {
+		t.Fatal("recipe with an invalid id was persisted")
+	}
+}
+
+func TestWeb_RecipeUpdateAndDelete(t *testing.T) {
+	s, _, _, _, _, sess := testServer()
+	ra := s.Recipes.(*stubRecipeAdmin)
+	ra.stored["pasta-tonno"] = recipes.Recipe{ID: "pasta-tonno", Nome: "Pasta al tonno",
+		Categoria: "primo", Porzioni: 2,
+		Ingredienti: []recipes.Ingredient{{Food: "pasta_secca", Qta: 200, Unita: "g"}}}
+
+	up := authedRequest(t, s, sess, http.MethodPost, "/app/recipes/pasta-tonno", url.Values{
+		"nome": {"Pasta al tonno e capperi"}, "categoria": {"primo"}, "porzioni": {"2"},
+		"ingredienti": {"pasta_secca | 220 | g"},
+	})
+	if up.Code != http.StatusSeeOther {
+		t.Fatalf("update = %d:\n%s", up.Code, up.Body.String())
+	}
+	if got := ra.stored["pasta-tonno"]; got.Nome != "Pasta al tonno e capperi" || got.Ingredienti[0].Qta != 220 {
+		t.Fatalf("update not applied: %+v", got)
+	}
+
+	del := authedRequest(t, s, sess, http.MethodPost, "/app/recipes/pasta-tonno/delete", nil)
+	if del.Code != http.StatusSeeOther {
+		t.Fatalf("delete = %d", del.Code)
+	}
+	if len(ra.deleted) != 1 || ra.deleted[0] != "pasta-tonno" {
+		t.Fatalf("delete not recorded: %v", ra.deleted)
 	}
 }

@@ -1,0 +1,27 @@
+{{template "head" .}}
+<h2>{{.R.Nome}}</h2>
+<div class="card">
+<b>ID:</b> {{.R.ID}} · <b>Categoria:</b> {{.R.Categoria}} · <b>Porzioni:</b> {{printf "%g" .R.Porzioni}}
+{{if .R.Stagioni}}· <b>Stagioni:</b> {{range $i, $s := .R.Stagioni}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}· <b>Stagioni:</b> tutto l'anno{{end}}
+{{if .R.Personale}}· <b>🔒 Personale</b> (esente dal filtro allergeni di famiglia){{end}}
+{{if .R.Tag}}<br><b>Tag:</b> {{range $i, $t := .R.Tag}}{{if $i}}, {{end}}{{$t}}{{end}}{{end}}
+{{if .R.Fonte}}<br><b>Fonte:</b> {{.R.Fonte}}{{end}}
+</div>
+{{if .Macros}}<div class="card"><b>Per porzione:</b>
+{{printf "%.0f" (index .Macros "kcal")}} kcal ·
+carbo {{printf "%.1f" (index .Macros "carbo")}}g ·
+proteine {{printf "%.1f" (index .Macros "proteine")}}g ·
+grassi {{printf "%.1f" (index .Macros "grassi")}}g ·
+fibra {{printf "%.1f" (index .Macros "fibra")}}g
+{{if .Allergeni}}<br><b>Allergeni:</b> {{range $i, $a := .Allergeni}}{{if $i}}, {{end}}{{$a}}{{end}}{{else}}<br><b>Allergeni:</b> nessuno{{end}}
+</div>{{end}}
+<h3>Ingredienti</h3>
+<table><tr><th>Alimento</th><th>Q.tà</th><th>Unità</th></tr>
+{{range .R.Ingredienti}}<tr><td>{{.Food}}</td><td>{{printf "%g" .Qta}}</td><td>{{.Unita}}</td></tr>{{end}}
+</table>
+<p><a href="/app/recipes/{{.R.ID}}/edit">✏️ Modifica</a> · <a href="/app/recipes">← Elenco</a></p>
+<form method="post" action="/app/recipes/{{.R.ID}}/delete" class="card">
+<b>Elimina</b> — la ricetta sparisce dal ricettario e dai suggerimenti del coach.<br>
+<input type="submit" value="🗑 Elimina definitivamente">
+</form>
+{{template "foot" .}}

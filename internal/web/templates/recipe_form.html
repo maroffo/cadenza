@@ -1,0 +1,32 @@
+{{template "head" .}}
+<h2>{{if eq .Mode "add"}}Nuova ricetta{{else}}Modifica ricetta{{end}}</h2>
+{{if .Errors}}<div class="card" style="border-color:#c0392b">
+<b>Correggi questi problemi:</b>
+<ul>{{range .Errors}}<li>{{.}}</li>{{end}}</ul>
+</div>{{end}}
+<form method="post" action="{{.Action}}">
+{{if eq .Mode "add"}}
+<p><label>ID (slug, minuscole/cifre/trattini): <input name="id" value="{{.ID}}" placeholder="pasta-tonno" required></label></p>
+{{else}}
+<input type="hidden" name="id" value="{{.ID}}">
+<p><small>ID: <code>{{.ID}}</code> (non modificabile)</small></p>
+{{end}}
+<p><label>Nome: <input name="nome" value="{{.Nome}}" size="40" required></label></p>
+<p><label>Categoria: <input name="categoria" list="categorie" value="{{.Categoria}}" required></label>
+<datalist id="categorie">{{range .Categorie}}<option value="{{.}}">{{end}}</datalist></p>
+<p><label>Porzioni: <input type="number" name="porzioni" step="0.5" min="0.5" value="{{.Porzioni}}" required></label></p>
+<p><label>Tag (separati da virgola): <input name="tag" value="{{.Tag}}" size="40"></label></p>
+<p><label>Fonte: <input name="fonte" value="{{.Fonte}}" size="40"></label></p>
+<fieldset><legend>Stagioni (nessuna selezionata = tutto l'anno)</legend>
+{{range .StagioniAll}}<label><input type="checkbox" name="stagione_{{.}}" {{if index $.Stagioni .}}checked{{end}}> {{.}}</label>&nbsp;&nbsp;{{end}}
+</fieldset>
+<p><label><input type="checkbox" name="personale" {{if .Personale}}checked{{end}}> Ricetta personale dell'atleta (esente dal filtro allergeni di famiglia)</label></p>
+<p><label>Ingredienti, uno per riga come <code>food_id | qta | unita</code>:<br>
+<textarea name="ingredienti" rows="10" cols="52" required>{{.Ingredienti}}</textarea></label></p>
+<p><label>Cerca id alimento: <input list="foods" placeholder="digita per l'autocomplete, poi copialo sopra"></label>
+<datalist id="foods">{{range .FoodIDs}}<option value="{{.}}">{{end}}</datalist></p>
+<p><small>Unità valide: {{range $i, $u := .Units}}{{if $i}}, {{end}}<code>{{$u}}</code>{{end}}. Unità vuota = grammi.</small></p>
+<p><input type="submit" value="💾 Salva"></p>
+</form>
+<p><a href="/app/recipes">← Elenco</a></p>
+{{template "foot" .}}
