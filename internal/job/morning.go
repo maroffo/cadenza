@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maroffo/cadenza/internal/agent"
+	"github.com/maroffo/cadenza/internal/exercises"
 	"github.com/maroffo/cadenza/internal/icu"
 	"github.com/maroffo/cadenza/internal/store"
 	"github.com/maroffo/cadenza/internal/task"
@@ -90,6 +91,12 @@ type Morning struct {
 	Keyboard KeyboardSender
 	// Debrief piggybacks the morning run (M9.5); nil skips.
 	Debrief *Debrief
+	// Exercises powers the daily prevention/strength routine appended to the
+	// morning message; nil skips the block entirely.
+	Exercises *exercises.Catalog
+	// Equipment restricts the routine to the athlete's standing home kit
+	// (empty = full kit). Body weight is always allowed.
+	Equipment []string
 	// Retry schedules the +45min self-retry when today's HRV has not synced
 	// yet. Nil disables deferral: the message goes out with data gaps.
 	Retry task.DelayedEnqueuer
@@ -134,7 +141,7 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	}
 
 	// HRV not synced yet: defer once or twice rather than coaching on gaps
-	// at 07:00 sharp. The deferred run doc keeps the watchdog quiet; the
+	// at 09:00 sharp. The deferred run doc keeps the watchdog quiet; the
 	// terminal attempt always sends, so the worst case is a late message,
 	// never a silent morning.
 	if in.Today.HRV == nil && attempt < MaxMorningRetries && m.Retry != nil {
@@ -162,6 +169,13 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	v := verdict.Compute(in, verdict.DefaultRules())
 	body := telegram.MorningBody(data)
 	full, narrative, status := m.narrate(ctx, today, body, v)
+
+	// The prevention/strength routine is a deterministic appendix: it rides
+	// after the coach prose but before the verdict footer, and is deliberately
+	// NOT fed to the narrator (its M4 contract is numbers + verdict, not sets).
+	if routine := m.routineBlock(today); routine != "" {
+		full += "\n\n" + routine
+	}
 
 	if err := m.Out.SendWithVerdict(ctx, full, v); err != nil {
 		return fmt.Errorf("morning: send: %w", err)
@@ -231,6 +245,33 @@ func (m Morning) narrate(ctx context.Context, today, body string, v verdict.Verd
 	// Markup contract enforced in code: prompts are wishes (decision 15 doctrine).
 	narrative = telegram.SanitizeNarrative(raw)
 	return narrative + "\n\n" + body, narrative, string(v.Kind)
+}
+
+// routinePerGroup is how many exercises each muscle group contributes to the
+// morning routine (arms/legs/back/core -> 8 total).
+const routinePerGroup = 2
+
+// routineBlock renders the day's prevention/strength routine, or "" when no
+// catalog is wired. The seed is the local epoch-day so the picks rotate once
+// per calendar day and are identical across restarts and the +45min retries.
+func (m Morning) routineBlock(today string) string {
+	if m.Exercises == nil {
+		return ""
+	}
+	seed := 0
+	if day, err := time.ParseInLocation(dateLayout, today, m.TZ); err == nil {
+		seed = int(day.Unix() / 86400)
+	}
+	picks := m.Exercises.DailyRoutine(seed, routinePerGroup, m.Equipment)
+	groups := make([]telegram.RoutineGroup, 0, len(picks))
+	for _, p := range picks {
+		exs := make([]telegram.RoutineExercise, 0, len(p.Exercises))
+		for _, e := range p.Exercises {
+			exs = append(exs, telegram.RoutineExercise{Name: e.Name, Equipment: e.Equipment})
+		}
+		groups = append(groups, telegram.RoutineGroup{Label: p.Label, Exercises: exs})
+	}
+	return telegram.MorningRoutine(groups)
 }
 
 // persistExchange records the morning as a session; best-effort by design.

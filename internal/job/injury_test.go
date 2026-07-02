@@ -408,7 +408,7 @@ func TestConverse_LogInjuryToolOpensAndSchedules(t *testing.T) {
 	if len(retry.envs) != 1 || !strings.Contains(retry.envs[0].ID, "day2-r1") {
 		t.Fatalf("day2 wakeup not scheduled: %+v", retry.envs)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }

@@ -29,7 +29,7 @@ func (a *stubAnimator) SendAnimation(_ context.Context, source, caption string) 
 	a.sources = append(a.sources, source)
 	a.captions = append(a.captions, caption)
 	if a.out != nil {
-		a.bodiesAt = append(a.bodiesAt, len(a.out.bodies))
+		a.bodiesAt = append(a.bodiesAt, len(a.out.plain))
 	}
 	return a.fileID, a.err
 }
@@ -140,14 +140,14 @@ func TestDemoDelivery_TextBeforeGIF_FirstSendUsesURLAndCaches(t *testing.T) {
 	}
 
 	// The @demo line is stripped from the delivered text.
-	if len(out.bodies) != 1 {
-		t.Fatalf("bodies = %d, want 1", len(out.bodies))
+	if len(out.plain) != 1 {
+		t.Fatalf("bodies = %d, want 1", len(out.plain))
 	}
-	if strings.Contains(out.bodies[0], "@demo") {
-		t.Errorf("annotation leaked into reply: %q", out.bodies[0])
+	if strings.Contains(out.plain[0], "@demo") {
+		t.Errorf("annotation leaked into reply: %q", out.plain[0])
 	}
-	if !strings.Contains(out.bodies[0], "sit-up") {
-		t.Errorf("reply lost its content: %q", out.bodies[0])
+	if !strings.Contains(out.plain[0], "sit-up") {
+		t.Errorf("reply lost its content: %q", out.plain[0])
 	}
 
 	// Exactly one animation, sent AFTER the text (one body already delivered).
@@ -209,8 +209,8 @@ func TestDemoDelivery_CacheReadErrorFallsBackToURL(t *testing.T) {
 		t.Fatalf("Converse: %v", err)
 	}
 	// A cache READ error degrades to the source URL, never fails the reply.
-	if len(out.bodies) != 1 {
-		t.Fatalf("reply not delivered: bodies = %d", len(out.bodies))
+	if len(out.plain) != 1 {
+		t.Fatalf("reply not delivered: bodies = %d", len(out.plain))
 	}
 	ex, _ := cat.ByID("0001")
 	if len(anim.sources) != 1 || anim.sources[0] != cat.GIFSourceURL(ex) {
@@ -237,8 +237,8 @@ func TestDemoDelivery_SendFailureSkipsAndDoesNotCache(t *testing.T) {
 		t.Fatalf("Converse must stay nil on demo send failure: %v", err)
 	}
 	// Contract: the coaching reply still reaches the athlete.
-	if len(out.bodies) != 1 {
-		t.Fatalf("reply not delivered despite demo failure: bodies = %d", len(out.bodies))
+	if len(out.plain) != 1 {
+		t.Fatalf("reply not delivered despite demo failure: bodies = %d", len(out.plain))
 	}
 	// Both ids are still attempted (one failure does not abort the rest)...
 	if len(anim.sources) != 2 {
@@ -264,7 +264,7 @@ func TestDemoDelivery_UnknownIDAndNoAnimatorAreSafe(t *testing.T) {
 	if len(anim.sources) != 0 {
 		t.Errorf("sent animation for unknown id: %v", anim.sources)
 	}
-	if len(out.bodies) != 1 || strings.Contains(out.bodies[0], "@demo") {
-		t.Errorf("reply mishandled: %v", out.bodies)
+	if len(out.plain) != 1 || strings.Contains(out.plain[0], "@demo") {
+		t.Errorf("reply mishandled: %v", out.plain)
 	}
 }

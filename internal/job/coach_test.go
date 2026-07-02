@@ -133,8 +133,14 @@ func TestConverse_HappyPathPrefixAndPersistence(t *testing.T) {
 	if err := c.Converse(context.Background(), "come sto messo?"); err != nil {
 		t.Fatalf("Converse: %v", err)
 	}
-	if len(out.bodies) != 1 || !strings.Contains(out.bodies[0], "fresco") {
-		t.Fatalf("reply not sent with verdict footer: %v", out.bodies)
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "fresco") {
+		t.Fatalf("reply not sent: %v", out.plain)
+	}
+	// The verdict footer belongs to the morning message only: a conversational
+	// reply must NOT carry it (the verdict still reaches the model via userText,
+	// asserted below on the request).
+	if strings.Contains(out.plain[0], "VERDETTO") {
+		t.Errorf("conversational reply leaked the verdict footer:\n%s", out.plain[0])
 	}
 
 	raw := string(llm.Requests[0].Raw)
@@ -218,7 +224,7 @@ func TestConverse_CorruptSessionFallsBackFresh(t *testing.T) {
 	if err := c.Converse(context.Background(), "ci sei?"); err != nil {
 		t.Fatalf("Converse: %v (decision 11: fresh session, never crash)", err)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("no reply after fallback")
 	}
 }
@@ -265,8 +271,8 @@ func TestConverse_ReplySanitized(t *testing.T) {
 	if err := c.Converse(context.Background(), "ok"); err != nil {
 		t.Fatalf("Converse: %v", err)
 	}
-	if strings.Contains(out.bodies[0], "<a") || strings.Contains(out.bodies[0], "<script") {
-		t.Errorf("model markup escaped the allowlist:\n%s", out.bodies[0])
+	if strings.Contains(out.plain[0], "<a") || strings.Contains(out.plain[0], "<script") {
+		t.Errorf("model markup escaped the allowlist:\n%s", out.plain[0])
 	}
 }
 
@@ -299,9 +305,9 @@ func TestConverse_ProposalFlow(t *testing.T) {
 	if len(conf.yes[0]) > 64 {
 		t.Errorf("callback data %d bytes, over Telegram's 64", len(conf.yes[0]))
 	}
-	// The model's final reply still went out with the verdict footer.
-	if len(out.bodies) != 1 {
-		t.Fatalf("final reply missing: %v", out.bodies)
+	// The model's final reply still went out (footer-free: morning-only now).
+	if len(out.plain) != 1 {
+		t.Fatalf("final reply missing: %v", out.plain)
 	}
 }
 
@@ -393,7 +399,7 @@ func TestConverse_PersistSkipsOnUnknownSeq(t *testing.T) {
 	if err := c.Converse(context.Background(), "ehi"); err != nil {
 		t.Fatalf("Converse: %v", err)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply lost")
 	}
 	if len(convo.stubSessions.turns) != 0 {
@@ -410,7 +416,7 @@ func TestConverse_PrefixUnavailableDegradesUncached(t *testing.T) {
 	if err := c.Converse(context.Background(), "ci sei?"); err != nil {
 		t.Fatalf("Converse: %v (prefix blip must not strand the athlete)", err)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("no reply")
 	}
 	raw := string(llm.Requests[0].Raw)
@@ -545,7 +551,7 @@ func TestConverse_WriteWorkout_GateRejectThenRegenPasses(t *testing.T) {
 	if len(led.recs) != 1 || led.recs[0].Status != "verified" {
 		t.Errorf("ledger = %+v", led.recs)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("final reply missing")
 	}
 }
@@ -595,7 +601,7 @@ func TestConverse_WriteWorkout_UnverifiedSurfacesToModel(t *testing.T) {
 	if len(led.recs) != 1 || led.recs[0].Status != "unverified_surfaced" {
 		t.Errorf("ledger = %+v", led.recs)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }
@@ -651,7 +657,7 @@ func TestConverse_WriterErrorDegradesWithoutLeak(t *testing.T) {
 	if len(led.recs) != 0 {
 		t.Error("ledger record written for a failed write")
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }
@@ -673,7 +679,7 @@ func TestConverse_LedgerBlipNeverFailsAVerifiedWrite(t *testing.T) {
 	if !strings.Contains(string(second), "VERIFICATO") {
 		t.Errorf("ledger blip converted a verified write into failure:\n%s", second)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }
@@ -752,7 +758,7 @@ func TestConverse_RotationCarriesSummary(t *testing.T) {
 	if chat.active == "s-full" {
 		t.Error("session not rotated")
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }
@@ -775,7 +781,7 @@ func TestConverse_SummaryFailureRotatesAnyway(t *testing.T) {
 	if err := c.Converse(context.Background(), "ci sei?"); err != nil {
 		t.Fatalf("Converse: %v (a summary failure must never block the athlete)", err)
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing after summary failure")
 	}
 	if chat.active == "s-full2" {
@@ -840,7 +846,7 @@ func TestProfilePrefix_EmptyIdentityDegradesToDayOne(t *testing.T) {
 			t.Errorf("empty identity rendered %q", forbidden)
 		}
 	}
-	if len(out.bodies) != 1 {
+	if len(out.plain) != 1 {
 		t.Fatal("reply missing")
 	}
 }

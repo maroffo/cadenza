@@ -31,8 +31,8 @@ The coaching behavior itself is specified in [docs/spec/coach-system-prompt-v1.m
 Telegram ──webhook──▶ ┌──────────────────────────────┐
                       │  Cloud Run service "cadenza" │
 Cloud Scheduler ────▶ │  /telegram/webhook (enqueue) │ ──▶ intervals.icu REST
- (07:00 morning,      │  /internal/execute (OIDC)    │ ──▶ Anthropic Claude API
-  07:15 watchdog,     │  /health                    │ ──▶ Telegram Bot API
+ (09:00 morning,      │  /internal/execute (OIDC)    │ ──▶ Anthropic Claude API
+  09:15 watchdog,     │  /health                    │ ──▶ Telegram Bot API
   12:00 reconcile)    └──────────────┬───────────────┘
 Cloud Tasks ◀─── named timers ───────┘
    │                                 │
@@ -95,7 +95,7 @@ The pre-commit hook runs `make check && make test-e2e`; commits on `main`/`maste
 
 ## Deployment (M2)
 
-Target stack: one Cloud Run service (max-instances 1), a Cloud Tasks queue with concurrency 1 (per-chat serialization and spend control), three Cloud Scheduler jobs (morning check 07:00 Europe/Rome, watchdog 07:15, reconcile 12:00), Firestore, Secret Manager with pinned secret versions, log-based Monitoring alerts to email, GitHub Actions deploy via Workload Identity Federation. Provisioning is an idempotent `deploy/setup.sh` (gcloud, describe-before-create); every command doubles as runbook documentation.
+Target stack: one Cloud Run service (max-instances 1), a Cloud Tasks queue with concurrency 1 (per-chat serialization and spend control), three Cloud Scheduler jobs (morning check 09:00 Europe/Rome, watchdog 09:15, reconcile 12:00), Firestore, Secret Manager with pinned secret versions, log-based Monitoring alerts to email, GitHub Actions deploy via Workload Identity Federation. Provisioning is an idempotent `deploy/setup.sh` (gcloud, describe-before-create); every command doubles as runbook documentation.
 
 Expected running cost: GCP roughly zero at single-athlete volume; the Anthropic API is the only real spend, capped from the console.
 
