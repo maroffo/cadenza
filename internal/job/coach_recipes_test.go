@@ -134,3 +134,34 @@ func TestSuggestRecipe_EmptyResult(t *testing.T) {
 		t.Errorf("expected empty-result message, got: %q", reply)
 	}
 }
+
+func TestListRecipes_ReturnsWholeBookIncludingOffSeason(t *testing.T) {
+	c := &Coach{Recipes: recipeBook(t), MealExcludeAllergens: []string{"lactose"}, Now: fixedNow, TZ: testTZ}
+	reply, err := c.listRecipes([]byte(`{}`))
+	if err != nil {
+		t.Fatalf("listRecipes: %v", err)
+	}
+	i := strings.Index(reply, "{")
+	var out struct {
+		Totale  int `json:"totale"`
+		Ricette []struct {
+			ID string `json:"id"`
+		} `json:"ricette"`
+	}
+	if err := json.Unmarshal([]byte(reply[i:]), &out); err != nil {
+		t.Fatalf("bad JSON: %v", err)
+	}
+	if out.Totale < 100 {
+		t.Errorf("expected the whole book (>=100), got %d", out.Totale)
+	}
+	seen := map[string]bool{}
+	for _, r := range out.Ricette {
+		seen[r.ID] = true
+	}
+	// off-season / non-summer dishes must appear in a full listing
+	for _, id := range []string{"riso-cantonese", "riso-cantonese-veg", "lasagne", "minestrone"} {
+		if !seen[id] {
+			t.Errorf("full listing is missing %q", id)
+		}
+	}
+}
