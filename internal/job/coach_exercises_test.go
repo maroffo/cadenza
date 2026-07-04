@@ -11,6 +11,7 @@ import (
 
 	"github.com/maroffo/cadenza/internal/exercises"
 	"github.com/maroffo/cadenza/internal/fakes"
+	"github.com/maroffo/cadenza/internal/telegram"
 )
 
 // stubAnimator records every animation send and returns a fixed file_id; it also
@@ -74,7 +75,8 @@ func TestExtractDemos(t *testing.T) {
 		{"single", "Prova il goblet squat.\n@demo: 0001", "Prova il goblet squat.", []string{"0001"}},
 		{"multi-and-spaces", "Schiena:\n@demo: 0001, 0419 ,0007", "Schiena:", []string{"0001", "0419", "0007"}},
 		{"case-insensitive", "Ecco.\n@DEMO: 0002", "Ecco.", []string{"0002"}},
-		{"dedup-and-cap", "X\n@demo: 1,1,2,3,4,5,6", "X", []string{"1", "2", "3", "4"}},
+		// Cap = 8 (the full morning routine must fit in one reply); the 9th drops.
+		{"dedup-and-cap", "X\n@demo: 1,1,2,3,4,5,6,7,8,9", "X", []string{"1", "2", "3", "4", "5", "6", "7", "8"}},
 		{"mid-text-line", "Riga uno\n@demo: 9\nRiga due", "Riga uno\nRiga due", []string{"9"}},
 	}
 	for _, tc := range cases {
@@ -236,9 +238,13 @@ func TestDemoDelivery_SendFailureSkipsAndDoesNotCache(t *testing.T) {
 	if err := c.Converse(context.Background(), "mostrami"); err != nil {
 		t.Fatalf("Converse must stay nil on demo send failure: %v", err)
 	}
-	// Contract: the coaching reply still reaches the athlete.
-	if len(out.plain) != 1 {
-		t.Fatalf("reply not delivered despite demo failure: bodies = %d", len(out.plain))
+	// Contract: the coaching reply reaches the athlete, AND the partial delivery
+	// is told to him (review finding: a silent half-routine looks like amnesia).
+	if len(out.plain) != 2 {
+		t.Fatalf("sends = %d, want 2 (reply + failure notice): %v", len(out.plain), out.plain)
+	}
+	if !strings.Contains(out.plain[1], "2 dimostrazioni su 2") {
+		t.Errorf("failure notice malformed: %q", out.plain[1])
 	}
 	// Both ids are still attempted (one failure does not abort the rest)...
 	if len(anim.sources) != 2 {
@@ -266,5 +272,123 @@ func TestDemoDelivery_UnknownIDAndNoAnimatorAreSafe(t *testing.T) {
 	}
 	if len(out.plain) != 1 || strings.Contains(out.plain[0], "@demo") {
 		t.Errorf("reply mishandled: %v", out.plain)
+	}
+}
+
+func TestRoutineSeed_DailyAndDegraded(t *testing.T) {
+	a := routineSeed("2026-06-10", testTZ)
+	b := routineSeed("2026-06-11", testTZ)
+	if b != a+1 {
+		t.Errorf("consecutive dates: %d then %d, want +1 (daily rotation)", a, b)
+	}
+	if got := routineSeed("garbage", testTZ); got != 0 {
+		t.Errorf("parse error seed = %d, want 0", got)
+	}
+}
+
+func TestConverse_RoutineWithIDsInContext(t *testing.T) {
+	llm := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm)
+	cat := exercises.MustLoad()
+	c.Catalog = cat
+
+	if err := c.Converse(context.Background(), "mi fai vedere le gif degli esercizi?"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	raw := string(llm.Requests[0].Raw)
+	if !strings.Contains(raw, "Routine prevenzione/forza di oggi") {
+		t.Fatal("routine block missing from the model context")
+	}
+	// The context must carry the SAME picks as the morning message for this date
+	// (fixedNow = 2026-06-10), id + name, so @demo needs no search and no guessing.
+	picks := cat.DailyRoutine(routineSeed("2026-06-10", testTZ), routinePerGroup, nil)
+	for _, p := range picks {
+		for _, ex := range p.Exercises {
+			if !strings.Contains(raw, ex.ID+" "+ex.Name) {
+				t.Errorf("context missing routine exercise %s %q", ex.ID, ex.Name)
+			}
+		}
+	}
+}
+
+func TestConverse_NoCatalogNoRoutineContext(t *testing.T) {
+	llm := fakes.NewAnthropic(fakes.Text{S: "ok"})
+	defer llm.Close()
+	c, _, _, _, _, _ := newCoach(t, llm) // Catalog nil
+
+	if err := c.Converse(context.Background(), "ciao"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if strings.Contains(string(llm.Requests[0].Raw), "Routine prevenzione/forza") {
+		t.Error("routine context present without a catalog")
+	}
+}
+
+func TestRoutineContext_MatchesMorningBlock(t *testing.T) {
+	// The athlete reads the morning block; the model reads routineContext. Same
+	// date + same catalog + same equipment MUST mean the same exercises, or the
+	// coach talks about a routine the athlete never received.
+	cat := exercises.MustLoad()
+	c := &Coach{Catalog: cat, Now: fixedNow, TZ: testTZ}
+	m := Morning{Exercises: cat, Now: fixedNow, TZ: testTZ}
+
+	coachCtx := c.routineContext(context.Background(), "2026-06-10")
+	morning := m.routineBlock("2026-06-10")
+	for _, p := range cat.DailyRoutine(routineSeed("2026-06-10", testTZ), routinePerGroup, nil) {
+		for _, ex := range p.Exercises {
+			if !strings.Contains(morning, telegram.Escape(ex.Name)) {
+				t.Errorf("morning block missing %q", ex.Name)
+			}
+			if !strings.Contains(coachCtx, ex.ID) {
+				t.Errorf("coach context missing id %s (%q)", ex.ID, ex.Name)
+			}
+		}
+	}
+}
+
+type stubMorningRuns struct {
+	done bool
+	err  error
+}
+
+func (s stubMorningRuns) MorningCompleted(context.Context, string) (bool, error) {
+	return s.done, s.err
+}
+
+func TestRoutineContext_PreSendWindowShowsYesterday(t *testing.T) {
+	// Live-bug follow-up (review finding): between midnight and the morning
+	// send, the routine the athlete LAST RECEIVED is yesterday's. The context
+	// must say so and carry BOTH days, honestly labeled.
+	cat := exercises.MustLoad()
+	c := &Coach{Catalog: cat, MorningRuns: stubMorningRuns{done: false}, Now: fixedNow, TZ: testTZ}
+	got := c.routineContext(context.Background(), "2026-06-10")
+
+	if !strings.Contains(got, "NON e' ancora stato inviato") {
+		t.Fatalf("pre-send window not labeled:\n%s", got)
+	}
+	if !strings.Contains(got, "ieri, 2026-06-09") {
+		t.Errorf("yesterday's routine missing:\n%s", got)
+	}
+	for _, p := range cat.DailyRoutine(routineSeed("2026-06-09", testTZ), routinePerGroup, nil) {
+		for _, ex := range p.Exercises {
+			if !strings.Contains(got, ex.ID) {
+				t.Errorf("context missing yesterday's exercise id %s (%q)", ex.ID, ex.Name)
+			}
+		}
+	}
+
+	// Once today's message is out, a single honestly-labeled block remains.
+	c.MorningRuns = stubMorningRuns{done: true}
+	sent := c.routineContext(context.Background(), "2026-06-10")
+	if strings.Contains(sent, "NON e' ancora") || strings.Contains(sent, "ieri,") {
+		t.Errorf("post-send context still shows the pre-send window:\n%s", sent)
+	}
+
+	// A Runs read error degrades to the common case (sent), never blocks.
+	c.MorningRuns = stubMorningRuns{err: errors.New("firestore blip")}
+	deg := c.routineContext(context.Background(), "2026-06-10")
+	if !strings.Contains(deg, "del messaggio del mattino di oggi") {
+		t.Errorf("degraded context malformed:\n%s", deg)
 	}
 }

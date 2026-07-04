@@ -30,6 +30,10 @@ type fakeTelegram struct {
 	// failPlain makes plain (no parse_mode) requests fail too.
 	failPlain bool
 	failed    bool
+	// animRetryAfter429 != nil makes the FIRST sendAnimation respond 429 with
+	// this retry_after (seconds); later ones succeed.
+	animRetryAfter429 *int
+	anim429ed         bool
 }
 
 // decodeForm normalizes a Telegram Bot API request (JSON, multipart, or
@@ -64,7 +68,20 @@ func (f *fakeTelegram) handler(w http.ResponseWriter, r *http.Request) {
 	if strings.HasSuffix(r.URL.Path, "/sendAnimation") {
 		f.mu.Lock()
 		f.requests = append(f.requests, decodeForm(r))
+		rateLimit := f.animRetryAfter429 != nil && !f.anim429ed
+		if rateLimit {
+			f.anim429ed = true
+		}
 		f.mu.Unlock()
+		if rateLimit {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok": false, "error_code": 429,
+				"description": "Too Many Requests: retry after " + fmt.Sprint(*f.animRetryAfter429),
+				"parameters":  map[string]any{"retry_after": *f.animRetryAfter429},
+			})
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"ok": true,
 			"result": map[string]any{
@@ -274,5 +291,39 @@ func TestSendAnimation_SendsSourceAndReturnsFileID(t *testing.T) {
 	}
 	if req["caption"] != "Squat" {
 		t.Errorf("caption = %q, want Squat", req["caption"])
+	}
+}
+
+func TestSendAnimation_RetriesOnceOn429(t *testing.T) {
+	// Telegram rate-limits same-chat bursts (the 8-GIF morning routine); the
+	// library does not retry, so the sender honors retry_after exactly once.
+	zero := 0 // retry_after 0: legal, and keeps the test sleep-free
+	fake := &fakeTelegram{animRetryAfter429: &zero}
+	s := newTestSender(t, fake)
+
+	fileID, err := s.SendAnimation(context.Background(), "FILE123", "Squat")
+	if err != nil {
+		t.Fatalf("SendAnimation after 429: %v", err)
+	}
+	if fileID != "CACHED123" {
+		t.Errorf("fileID = %q, want CACHED123 (retry result)", fileID)
+	}
+	if len(fake.requests) != 2 {
+		t.Fatalf("requests = %d, want 2 (429 + retry)", len(fake.requests))
+	}
+}
+
+func TestSendAnimation_LongRetryAfterGivesUp(t *testing.T) {
+	// A retry_after beyond the bound must NOT stall the reply pipeline: the
+	// demo is dropped (callers are best-effort and now tell the athlete).
+	long := 600
+	fake := &fakeTelegram{animRetryAfter429: &long}
+	s := newTestSender(t, fake)
+
+	if _, err := s.SendAnimation(context.Background(), "FILE123", "Squat"); err == nil {
+		t.Fatal("SendAnimation = nil, want the 429 surfaced when retry_after > bound")
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("requests = %d, want 1 (no retry past the bound)", len(fake.requests))
 	}
 }

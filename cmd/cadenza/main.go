@@ -311,6 +311,7 @@ func buildJobs(ctx context.Context, cfg *config.Config, retry task.DelayedEnqueu
 			Foods:                foodsCat,
 			Recipes:              recipeProvider,
 			Family:               store.NewProfiles(fsClient),
+			MorningRuns:          runs,
 			MealExcludeAllergens: cfg.MealExcludeAllergens,
 			MediaCache:           store.NewMediaCache(fsClient),
 			Animator:             sender,

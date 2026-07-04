@@ -10,6 +10,7 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -62,15 +63,32 @@ func (s *Sender) Send(ctx context.Context, text string) error {
 	return nil
 }
 
+// maxAnimationRetryAfter bounds the single 429 retry sleep: beyond this the
+// demo is dropped (the caller's best-effort path) instead of stalling the
+// whole reply pipeline behind one animation.
+const maxAnimationRetryAfter = 10 * time.Second
+
 // SendAnimation sends a GIF/animation by file_id OR URL (Telegram accepts both
 // as a string). Returns the Telegram file_id of the sent animation so callers
 // can cache it: re-sending by file_id avoids re-fetching the source.
+// A same-chat burst of demos (the 8-exercise morning routine) can trip
+// Telegram's per-chat rate limit; the library does NOT retry 429s, so one
+// bounded retry honoring retry_after happens here.
 func (s *Sender) SendAnimation(ctx context.Context, source, caption string) (string, error) {
-	msg, err := s.b.SendAnimation(ctx, &bot.SendAnimationParams{
-		ChatID:    s.chatID,
-		Animation: &models.InputFileString{Data: source},
-		Caption:   caption,
-	})
+	msg, err := s.sendAnimationOnce(ctx, source, caption)
+	var tmr *bot.TooManyRequestsError
+	if errors.As(err, &tmr) {
+		wait := time.Duration(tmr.RetryAfter) * time.Second
+		if wait > maxAnimationRetryAfter {
+			return "", err
+		}
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		msg, err = s.sendAnimationOnce(ctx, source, caption)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -78,6 +96,14 @@ func (s *Sender) SendAnimation(ctx context.Context, source, caption string) (str
 		return "", nil
 	}
 	return msg.Animation.FileID, nil
+}
+
+func (s *Sender) sendAnimationOnce(ctx context.Context, source, caption string) (*models.Message, error) {
+	return s.b.SendAnimation(ctx, &bot.SendAnimationParams{
+		ChatID:    s.chatID,
+		Animation: &models.InputFileString{Data: source},
+		Caption:   caption,
+	})
 }
 
 // AnswerCallback acknowledges a callback query. Mandatory after every tap or
