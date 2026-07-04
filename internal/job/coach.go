@@ -61,6 +61,14 @@ type FamilySource interface {
 	Family(ctx context.Context) (store.Family, error)
 }
 
+// MorningRunSource reports whether a date's morning message already went out;
+// satisfied by store.Runs. The coach uses it to label the routine context
+// honestly across midnight: before today's send, the routine the athlete last
+// RECEIVED is yesterday's. Nil degrades to "already sent".
+type MorningRunSource interface {
+	MorningCompleted(ctx context.Context, date string) (bool, error)
+}
+
 // MutationProposer appends a proposed profile change (idempotent by id);
 // Discard compensates when the confirm prompt cannot reach the athlete.
 type MutationProposer interface {
@@ -112,8 +120,10 @@ type Animator interface {
 }
 
 // maxDemosPerTurn caps how many demonstration GIFs one reply can push, so a
-// stray annotation can never spam the athlete with a wall of animations.
-const maxDemosPerTurn = 4
+// stray annotation can never spam the athlete with a wall of animations. Sized
+// to the morning routine (4 groups x 2): "le GIF degli esercizi di stamattina"
+// is the largest legitimate request and must fit in one reply.
+const maxDemosPerTurn = 8
 
 type Coach struct {
 	Agent      agent.Coach
@@ -152,6 +162,9 @@ type Coach struct {
 	// Family enables the meal_targets tool (per-person calorie targets per meal);
 	// nil hides it.
 	Family FamilySource
+	// MorningRuns tells the routine context whether today's morning message went
+	// out yet (nil = assume it did).
+	MorningRuns MorningRunSource
 	// MealExcludeAllergens are the family's HARD allergen exclusions for meal suggestions.
 	MealExcludeAllergens []string
 	// MediaCache caches Telegram file_ids for demo GIFs (nil = always fetch from source).
@@ -197,14 +210,84 @@ func (c *Coach) Converse(ctx context.Context, text string) error {
 	return nil
 }
 
+// routineContext renders the prevention/strength routine WITH exercise ids for
+// the model's deterministic context ("" when no catalog is wired). Same
+// seed/perGroup/equipment as the morning message, so the picks match what the
+// athlete receives — the coach answers "le GIF degli esercizi" with @demo on
+// exactly these ids instead of guessing from session memory (live bug,
+// 2026-07-03). Midnight honesty: before today's morning message goes out (e.g.
+// 00:00-09:00) the routine the athlete LAST RECEIVED is yesterday's, so both
+// are rendered with explicit labels instead of mislabeling today's as "quella
+// del messaggio del mattino".
+func (c *Coach) routineContext(ctx context.Context, today string) string {
+	if c.Catalog == nil {
+		return ""
+	}
+	sent := true
+	if c.MorningRuns != nil {
+		done, err := c.MorningRuns.MorningCompleted(ctx, today)
+		if err != nil {
+			// Degrade to the common case (most of the day the message is out).
+			slog.Warn("coach: morning-run check failed, assuming sent", "err", err)
+		} else {
+			sent = done
+		}
+	}
+	var b strings.Builder
+	if sent {
+		b.WriteString("\nRoutine prevenzione/forza di oggi (quella del messaggio del mattino di oggi; per le GIF usa QUESTI id con @demo):")
+		c.writeRoutine(&b, today)
+		return b.String()
+	}
+	b.WriteString("\nRoutine prevenzione/forza di oggi (ATTENZIONE: il messaggio del mattino di oggi NON e' ancora stato inviato; conterra' questa):")
+	c.writeRoutine(&b, today)
+	if day, err := time.ParseInLocation(dateOnly, today, c.TZ); err == nil {
+		yesterday := day.AddDate(0, 0, -1).Format(dateOnly)
+		b.WriteString("\nRoutine dell'ULTIMO messaggio del mattino ricevuto (ieri, " + yesterday + "):")
+		c.writeRoutine(&b, yesterday)
+	}
+	return b.String()
+}
+
+// writeRoutine appends one dated routine (groups with id, name, equipment).
+func (c *Coach) writeRoutine(b *strings.Builder, date string) {
+	picks := c.Catalog.DailyRoutine(routineSeed(date, c.TZ), routinePerGroup, c.DefaultEquipment)
+	for _, p := range picks {
+		if len(p.Exercises) == 0 {
+			continue
+		}
+		fmt.Fprintf(b, "\n- %s:", p.Label)
+		for i, ex := range p.Exercises {
+			if i > 0 {
+				b.WriteString(" ·")
+			}
+			fmt.Fprintf(b, " %s %s (%s)", ex.ID, ex.Name, ex.Equipment)
+		}
+	}
+}
+
+// demoSendPause spaces consecutive demo sends: Telegram tolerates only short
+// same-chat bursts (~1 msg/s guidance), and 8 cached-file_id sends would
+// otherwise land within a second or two.
+const demoSendPause = 500 * time.Millisecond
+
 // sendDemos delivers the requested exercise GIFs, caching the Telegram file_id
 // on first send so later demos of the same exercise skip the source fetch. Best
-// effort: a failed demo is logged and skipped, never failing the reply.
+// effort per demo — but a partial delivery is TOLD to the athlete, not just
+// logged (a silent half-routine looks like the coach forgot the rest).
 func (c *Coach) sendDemos(ctx context.Context, ids []string) {
 	if c.Animator == nil || c.Catalog == nil {
 		return
 	}
-	for _, id := range ids {
+	failed := 0
+	for i, id := range ids {
+		if i > 0 {
+			select {
+			case <-time.After(demoSendPause):
+			case <-ctx.Done():
+				return
+			}
+		}
 		ex, ok := c.Catalog.ByID(id)
 		if !ok {
 			slog.Warn("coach: demo id not in catalog", "id", id)
@@ -225,12 +308,20 @@ func (c *Coach) sendDemos(ctx context.Context, ids []string) {
 		newID, err := c.Animator.SendAnimation(ctx, source, ex.Name)
 		if err != nil {
 			slog.Warn("coach: demo send failed", "id", id, "err", err)
+			failed++
 			continue
 		}
 		if !cached && newID != "" && c.MediaCache != nil {
 			if err := c.MediaCache.Set(ctx, id, newID); err != nil {
 				slog.Warn("coach: media cache write failed", "id", id, "err", err)
 			}
+		}
+	}
+	if failed > 0 {
+		notice := fmt.Sprintf("⚠️ %d dimostrazioni su %d non sono partite (limiti Telegram): richiedimele tra qualche secondo.",
+			failed, len(ids))
+		if err := c.Out.Send(ctx, notice); err != nil {
+			slog.Warn("coach: demo failure notice failed", "err", err)
 		}
 	}
 }
@@ -317,11 +408,10 @@ func (c *Coach) converse(ctx context.Context, text string) (reply string, v verd
 		prefix = ""
 	}
 
-	userText := fmt.Sprintf(
-		"Contesto deterministico di oggi (gia' calcolato, non contraddirlo):\n%s\n%s\n\nMessaggio dell'atleta:\n%s",
-		body, verdict.RenderBlock(v), text)
-
 	today := c.Now().In(c.TZ).Format(dateOnly)
+	userText := fmt.Sprintf(
+		"Contesto deterministico di oggi (gia' calcolato, non contraddirlo):\n%s\n%s%s\n\nMessaggio dell'atleta:\n%s",
+		body, verdict.RenderBlock(v), c.routineContext(ctx, today), text)
 	res, err := c.Agent.Reply(ctx, agent.CoachInput{
 		Profile: prefix, History: history, UserText: userText,
 	}, c.tools(sessionID, v, today))

@@ -251,6 +251,17 @@ func (m Morning) narrate(ctx context.Context, today, body string, v verdict.Verd
 // morning routine (arms/legs/back/core -> 8 total).
 const routinePerGroup = 2
 
+// routineSeed maps a local date to its epoch-day: the routine rotation seed.
+// Shared by the morning message and the coach's context so the two can never
+// show different routines for the same day. Parse errors degrade to seed 0.
+func routineSeed(today string, tz *time.Location) int {
+	day, err := time.ParseInLocation(dateLayout, today, tz)
+	if err != nil {
+		return 0
+	}
+	return int(day.Unix() / 86400)
+}
+
 // routineBlock renders the day's prevention/strength routine, or "" when no
 // catalog is wired. The seed is the local epoch-day so the picks rotate once
 // per calendar day and are identical across restarts and the +45min retries.
@@ -258,11 +269,7 @@ func (m Morning) routineBlock(today string) string {
 	if m.Exercises == nil {
 		return ""
 	}
-	seed := 0
-	if day, err := time.ParseInLocation(dateLayout, today, m.TZ); err == nil {
-		seed = int(day.Unix() / 86400)
-	}
-	picks := m.Exercises.DailyRoutine(seed, routinePerGroup, m.Equipment)
+	picks := m.Exercises.DailyRoutine(routineSeed(today, m.TZ), routinePerGroup, m.Equipment)
 	groups := make([]telegram.RoutineGroup, 0, len(picks))
 	for _, p := range picks {
 		exs := make([]telegram.RoutineExercise, 0, len(p.Exercises))
