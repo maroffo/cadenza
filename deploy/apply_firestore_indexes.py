@@ -15,7 +15,12 @@ BROKEN_STATES = {"NEEDS_REPAIR", "DELETING"}
 
 
 def run_json(args: list[str]) -> Any:
-    proc = subprocess.run(args, check=True, text=True, capture_output=True)
+    proc = subprocess.run(args, text=True, capture_output=True)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip() or "no command output"
+        raise RuntimeError(
+            f"{args[0]} command failed with exit {proc.returncode}: {detail}"
+        )
     return json.loads(proc.stdout or "[]")
 
 
@@ -49,7 +54,7 @@ def list_indexes(project: str, database: str, group: str) -> list[dict[str, Any]
             "list",
             f"--project={project}",
             f"--database={database}",
-            f"--collection-group={group}",
+            f"--filter=COLLECTION_GROUP:{group}",
             "--format=json",
         ]
     )
