@@ -20,27 +20,44 @@ import (
 )
 
 type stubDedup struct {
-	reserved map[string]bool
-	err      error
-	released []string
+	reserved  map[string]string
+	completed map[string]bool
+	err       error
+	released  []string
+	next      int
 }
 
-func newStubDedup() *stubDedup { return &stubDedup{reserved: map[string]bool{}} }
+func newStubDedup() *stubDedup {
+	return &stubDedup{reserved: map[string]string{}, completed: map[string]bool{}}
+}
 
-func (s *stubDedup) Reserve(_ context.Context, key string, _ time.Duration) (bool, error) {
+func (s *stubDedup) Reserve(_ context.Context, key string, _ time.Duration) (string, error) {
 	if s.err != nil {
-		return false, s.err
+		return "", s.err
 	}
-	if s.reserved[key] {
-		return false, nil
+	if s.reserved[key] != "" || s.completed[key] {
+		return "", nil
 	}
-	s.reserved[key] = true
-	return true, nil
+	s.next++
+	leaseID := fmt.Sprintf("%032x", s.next)
+	s.reserved[key] = leaseID
+	return leaseID, nil
 }
 
-func (s *stubDedup) Release(_ context.Context, key string) error {
+func (s *stubDedup) Complete(_ context.Context, key, leaseID string) error {
+	if s.reserved[key] != leaseID {
+		return store.ErrDedupLeaseLost
+	}
 	delete(s.reserved, key)
-	s.released = append(s.released, key)
+	s.completed[key] = true
+	return nil
+}
+
+func (s *stubDedup) Release(_ context.Context, key, leaseID string) error {
+	if s.reserved[key] == leaseID {
+		delete(s.reserved, key)
+		s.released = append(s.released, key)
+	}
 	return nil
 }
 
@@ -196,16 +213,17 @@ func TestMessage_TransientFailureReleasesReservation(t *testing.T) {
 	}
 }
 
-func TestMessage_PoisonKeepsReservation(t *testing.T) {
+func TestMessage_PoisonCompletesReservation(t *testing.T) {
 	dedup := newStubDedup()
 	m := newMessage(&stubInteractor{}, dedup, &stubChats{})
+	env := envelopeFor(t, 11, msgPayload("/start", 666))
 
-	err := m.Run(context.Background(), envelopeFor(t, 11, msgPayload("/start", 666)))
+	err := m.Run(context.Background(), env)
 	if !errors.Is(err, task.ErrPoison) {
 		t.Fatalf("err = %v, want ErrPoison", err)
 	}
-	if len(dedup.released) != 0 {
-		t.Fatal("poison must keep the reservation: retrying cannot fix it")
+	if len(dedup.released) != 0 || !dedup.completed[env.ID] {
+		t.Fatal("poison must be completed, not released: retrying cannot fix it")
 	}
 }
 

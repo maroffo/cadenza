@@ -23,8 +23,8 @@ func (w Watchdog) Run(ctx context.Context) error {
 	today := w.Now().In(w.TZ).Format(dateLayout)
 
 	// Alive, not completed: a deferred run (HRV retry in flight) must not
-	// trigger a false alarm at 07:15; its terminal attempt always sends.
-	alive, err := w.Runs.MorningAlive(ctx, today)
+	// trigger a false alarm at 09:15; its terminal attempt always sends.
+	alive, err := w.Runs.MorningAlive(ctx, today, w.Now())
 	if err != nil {
 		return fmt.Errorf("watchdog: run check: %w", err)
 	}

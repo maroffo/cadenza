@@ -32,6 +32,9 @@
      --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/run.developer
    gcloud projects add-iam-policy-binding $PROJECT \
      --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/artifactregistry.writer
+   # deploy.yml applies firestore.indexes.json before each revision.
+   gcloud projects add-iam-policy-binding $PROJECT \
+     --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/datastore.indexAdmin
    gcloud iam service-accounts add-iam-policy-binding \
      cadenza-run@$PROJECT.iam.gserviceaccount.com \
      --member="serviceAccount:cadenza-deploy@$PROJECT.iam.gserviceaccount.com" --role=roles/iam.serviceAccountUser
@@ -41,7 +44,7 @@
    ```bash
    gh variable set DEPLOY_ENABLED --body true
    ```
-5. **First deploy**: push to `main` (deploy.yml) or run the gcloud command setup.sh prints.
+5. **First deploy**: push to `main`; `deploy.yml` starts only after the `ci` workflow succeeds for that exact SHA. In bootstrap, the gcloud command printed by setup.sh is also available.
 6. **Re-run `deploy/setup.sh`**: with the service URL now known it creates Scheduler jobs, invoker binding, alert policies.
 7. **Anthropic spend cap** (before M4): set the monthly limit in the Anthropic console.
 
@@ -61,6 +64,7 @@ rotation is an auditable change, not a silent flip.
 
 ## Notes
 
-- The service is `--allow-unauthenticated` because Telegram webhooks cannot do OIDC; `/internal/execute` does its own in-app OIDC (audience + invoker email).
+- Telegram needs a public Cloud Run invoker binding, but only `setup.sh` owns that IAM change; the deploy workflow intentionally does not pass `--allow-unauthenticated`. `/internal/execute` still enforces in-app OIDC (audience + invoker email).
+- Cloud Run concurrency is fixed at 1 for this single-user service; the queue is serialized too.
 - Scheduler `--attempt-deadline=540s` is deliberate: the default ~180s would mark a slow morning run failed and retry it mid-flight.
 - The Tasks queue exists from M2 but is consumed starting M3 (webhook re-enqueue).

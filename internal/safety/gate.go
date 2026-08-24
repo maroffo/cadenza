@@ -20,6 +20,7 @@ const (
 	maxHardTotalSeconds = 40 * 60  // total time at Z4+ per workout
 	warmupCooldownMaxZ  = 2
 	maxDailyTSS         = 250
+	skipMaxMinutes      = 30 // defense-in-depth even if a malformed SKIP has empty caps
 	writeWindowDays     = 14 // [today, today+14]
 	hardZoneFloor       = 4
 )
@@ -93,6 +94,14 @@ func Vet(p workout.Plan, v verdict.Verdict, today string, week *WeekContext) Dec
 				block("verdetto SKIP", fmt.Sprintf("step a Z%d", zoneTop(s)), "solo Z1 in un giorno SKIP")
 				break
 			}
+		}
+		// A SKIP is a hard safety state, not just a zone label. Enforce the
+		// absolute recovery duration even if an upstream bug constructs a
+		// Verdict with empty Caps; explicit tighter caps below still apply.
+		if p.TotalSeconds() > skipMaxMinutes*60 {
+			block("durata in giorno SKIP",
+				fmt.Sprintf("%d minuti", p.TotalSeconds()/60),
+				fmt.Sprintf("max %d minuti oggi", skipMaxMinutes))
 		}
 	}
 	if p.Date == today && v.Caps.MaxZone != 0 {

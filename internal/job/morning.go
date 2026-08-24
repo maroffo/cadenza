@@ -54,11 +54,10 @@ type Messenger interface {
 type RunStore interface {
 	// MorningCompleted is true only for a terminal run (message sent).
 	MorningCompleted(ctx context.Context, date string) (bool, error)
-	// MorningAlive is true when ANY run state exists, including a deferral:
-	// the watchdog must stay quiet while a retry is in flight.
-	MorningAlive(ctx context.Context, date string) (bool, error)
+	// MorningAlive is true for completed runs and unexpired deferrals.
+	MorningAlive(ctx context.Context, date string, now time.Time) (bool, error)
 	MarkMorningCompleted(ctx context.Context, date, status string) error
-	MarkMorningDeferred(ctx context.Context, date string, attempt int) error
+	MarkMorningDeferred(ctx context.Context, date string, attempt int, until time.Time) error
 }
 
 const (
@@ -146,9 +145,6 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	// never a silent morning.
 	if in.Today.HRV == nil && attempt < MaxMorningRetries && m.Retry != nil {
 		next := attempt + 1
-		if err := m.Runs.MarkMorningDeferred(ctx, today, next); err != nil {
-			return fmt.Errorf("morning: mark deferred: %w", err)
-		}
 		payload, err := json.Marshal(morningPayload{Attempt: next})
 		if err != nil {
 			return fmt.Errorf("morning: marshal retry payload: %w", err)
@@ -159,10 +155,16 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 			ID:      fmt.Sprintf("morning-%s-r%d", today, next),
 			Payload: payload,
 		}
-		if err := m.Retry.EnqueueAt(ctx, env, m.Now().Add(MorningRetryDelay)); err != nil {
+		until := m.Now().Add(MorningRetryDelay)
+		if err := m.Retry.EnqueueAt(ctx, env, until); err != nil {
 			return fmt.Errorf("morning: schedule retry: %w", err)
 		}
-		slog.Info("morning: HRV not synced, deferred", "date", today, "attempt", next)
+		// Persist liveness only after Cloud Tasks accepted the named retry.
+		// If this write fails, the scheduled task still re-drives the flow.
+		if err := m.Runs.MarkMorningDeferred(ctx, today, next, until); err != nil {
+			return fmt.Errorf("morning: mark deferred: %w", err)
+		}
+		slog.Info("morning: HRV not synced, deferred", "date", today, "attempt", next, "until", until)
 		return nil
 	}
 
@@ -173,8 +175,13 @@ func (m Morning) RunAttempt(ctx context.Context, attempt int) error {
 	// The prevention/strength routine is a deterministic appendix: it rides
 	// after the coach prose but before the verdict footer, and is deliberately
 	// NOT fed to the narrator (its M4 contract is numbers + verdict, not sets).
-	if routine := m.routineBlock(today); routine != "" {
-		full += "\n\n" + routine
+	// Never prescribe generic strength while an injury is open or its registry
+	// is unavailable: without body-part filtering the appendix could contradict
+	// the conservative verdict even below the pain threshold.
+	if v.Kind != verdict.Skip && !in.DataGapInjuries && len(in.Injuries) == 0 {
+		if routine := m.routineBlock(today); routine != "" {
+			full += "\n\n" + routine
+		}
 	}
 
 	if err := m.Out.SendWithVerdict(ctx, full, v); err != nil {

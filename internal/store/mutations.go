@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -182,7 +183,7 @@ func (m *Mutations) apply(tx *firestore.Transaction, id string, mut *Mutation) e
 		}
 		// Tier A gate at apply time: even a confirmed hostile value cannot
 		// loosen past the code ceiling.
-		if cap <= 0 || cap > tierARampCapStore {
+		if cap <= 0 || cap > tierARampCapStore || math.IsNaN(cap) || math.IsInf(cap, 0) {
 			return fmt.Errorf("%w: ramp_cap %v fuori da (0, %v]", ErrMutationInvalid, cap, tierARampCapStore)
 		}
 		return tx.Set(m.client.Collection(profileCollection).Doc(profileDocID),

@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
@@ -116,6 +117,8 @@ Formato: prosa breve e densa, niente tabelle, niente markdown; al massimo
 <b> o <i> HTML per i punti chiave.`
 
 // Coach runs the deep tier.
+const coachRunTimeout = 3 * time.Minute
+
 type Coach struct {
 	Client Client
 	Model  string
@@ -123,24 +126,31 @@ type Coach struct {
 
 // CoachInput carries the per-conversation state.
 type CoachInput struct {
-	Profile  string // stable athlete prefix (baselines, caps, rules)
-	History  []anthropic.MessageParam
-	UserText string // already wrapped with today's deterministic context
+	Profile    string // stable athlete prefix (baselines, caps, rules)
+	History    []anthropic.MessageParam
+	UserText   string // already wrapped with today's deterministic context
+	BeforeCall func(context.Context) error
 }
 
 func (c Coach) Reply(ctx context.Context, in CoachInput, tools Tools) (Result, error) {
 	if c.Model == "" {
 		return Result{}, fmt.Errorf("coach: model not configured")
 	}
-	return Run(ctx, c.Client, Request{
-		Model:     c.Model,
-		System:    coachSystem,
-		Profile:   in.Profile,
-		History:   in.History,
-		UserText:  in.UserText,
-		MaxTokens: 2048,
-		Cache:     true,
-		Thinking:  true,
-		Effort:    "high",
+	// Bound the entire multi-call tool loop, not only each HTTP round trip.
+	// This leaves time inside Message's four-minute claim and Cloud Run's
+	// 600-second request deadline for deterministic fallback and delivery.
+	runCtx, cancel := context.WithTimeout(ctx, coachRunTimeout)
+	defer cancel()
+	return Run(runCtx, c.Client, Request{
+		Model:      c.Model,
+		System:     coachSystem,
+		Profile:    in.Profile,
+		History:    in.History,
+		UserText:   in.UserText,
+		MaxTokens:  2048,
+		Cache:      true,
+		Thinking:   true,
+		Effort:     "high",
+		BeforeCall: in.BeforeCall,
 	}, tools)
 }

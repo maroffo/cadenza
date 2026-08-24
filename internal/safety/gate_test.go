@@ -78,6 +78,16 @@ func TestVet_VerdictCoupling(t *testing.T) {
 	if d.Action != Block {
 		t.Fatalf("SKIP-day Z2 = %s, want BLOCK", d.Action)
 	}
+	// Defense in depth: even a malformed SKIP verdict with empty caps cannot
+	// pass an arbitrarily long Z1 workout.
+	d = Vet(plan(today, step(31, 1)), verdict.Verdict{Kind: verdict.Skip}, today, nil)
+	if d.Action != Block {
+		t.Fatalf("SKIP-day 31m Z1 = %s, want BLOCK (%+v)", d.Action, d.Violations)
+	}
+	d = Vet(plan(today, step(30, 1)), verdict.Verdict{Kind: verdict.Skip}, today, nil)
+	if d.Action != Pass {
+		t.Fatalf("SKIP-day 30m Z1 = %s, want PASS (%+v)", d.Action, d.Violations)
+	}
 
 	v := verdict.Verdict{Kind: verdict.Modify, Caps: verdict.Caps{MaxZone: 2, MaxMinutes: 60}}
 	d = Vet(plan(today, step(30, 3)), v, today, nil)

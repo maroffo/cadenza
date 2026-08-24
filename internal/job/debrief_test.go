@@ -5,24 +5,48 @@ package job
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/maroffo/cadenza/internal/agent"
 	"github.com/maroffo/cadenza/internal/fakes"
 	"github.com/maroffo/cadenza/internal/icu"
+	"github.com/maroffo/cadenza/internal/store"
 )
 
-type memMarks struct{ seen map[string]bool }
+type memMarks struct {
+	seen   map[string]bool
+	claims map[string]string
+	next   int
+}
 
-func newMemMarks() *memMarks { return &memMarks{seen: map[string]bool{}} }
+func newMemMarks() *memMarks {
+	return &memMarks{seen: map[string]bool{}, claims: map[string]string{}}
+}
 
-func (m *memMarks) MarkOnce(_ context.Context, key string) (bool, error) {
-	if m.seen[key] {
-		return false, nil
+func (m *memMarks) Claim(_ context.Context, key string) (string, error) {
+	if m.seen[key] || m.claims[key] != "" {
+		return "", nil
 	}
+	m.next++
+	leaseID := fmt.Sprintf("%032x", m.next)
+	m.claims[key] = leaseID
+	return leaseID, nil
+}
+func (m *memMarks) Complete(_ context.Context, key, leaseID string) error {
+	if m.claims[key] != leaseID {
+		return store.ErrDebriefLeaseLost
+	}
+	delete(m.claims, key)
 	m.seen[key] = true
-	return true, nil
+	return nil
+}
+func (m *memMarks) Release(_ context.Context, key, leaseID string) error {
+	if m.claims[key] == leaseID {
+		delete(m.claims, key)
+	}
+	return nil
 }
 
 // settledActivity ended well before fixedNow (2026-06-10 07:00).
@@ -168,6 +192,39 @@ func TestDebrief_ExecutedSameSportSilencesMissed(t *testing.T) {
 		if strings.Contains(p, "non risulta") {
 			t.Fatalf("missed fired despite execution: %s", p)
 		}
+	}
+}
+
+func TestDebrief_SendFailureReleasesClaimForRetry(t *testing.T) {
+	d, out, marks := newDebrief(nil, []icu.Activity{
+		settledActivity("retry-send", "2026-06-09T18:00:00", "Run", 60),
+	}, nil)
+	out.err = context.DeadlineExceeded
+
+	if err := d.Sweep(context.Background()); err == nil {
+		t.Fatal("Sweep = nil, want aggregated send error")
+	}
+	if marks.seen["act-retry-send"] {
+		t.Fatal("failed send remained completed/claimed")
+	}
+	out.err = nil
+	if err := d.Sweep(context.Background()); err != nil {
+		t.Fatalf("retry Sweep: %v", err)
+	}
+	if len(out.plain) != 1 || !marks.seen["act-retry-send"] {
+		t.Fatalf("retry did not deliver+complete: messages=%v marks=%v", out.plain, marks.seen)
+	}
+}
+
+func TestDebrief_SweepAggregatesItemFailures(t *testing.T) {
+	d, out, _ := newDebrief(nil, []icu.Activity{
+		settledActivity("fail-a", "2026-06-09T17:00:00", "Run", 60),
+		settledActivity("fail-b", "2026-06-09T18:00:00", "Ride", 60),
+	}, nil)
+	out.err = context.DeadlineExceeded
+	err := d.Sweep(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "fail-a") || !strings.Contains(err.Error(), "fail-b") {
+		t.Fatalf("aggregate error = %v, want both activity ids", err)
 	}
 }
 

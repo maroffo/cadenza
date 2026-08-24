@@ -6,6 +6,7 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -25,9 +26,12 @@ const (
 	debriefSettle = 45 * time.Minute
 )
 
-// DebriefMarker is the processed-set; satisfied by store.Debriefs.
+// DebriefMarker is the fenced lease-backed delivery set; satisfied by
+// store.Debriefs. Complete/Release require the token returned to the owner.
 type DebriefMarker interface {
-	MarkOnce(ctx context.Context, key string) (bool, error)
+	Claim(ctx context.Context, key string) (string, error)
+	Complete(ctx context.Context, key, leaseID string) error
+	Release(ctx context.Context, key, leaseID string) error
 }
 
 type Debrief struct {
@@ -52,17 +56,20 @@ func (d Debrief) Sweep(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("debrief: activities: %w", err)
 	}
+	var failures []error
 	for _, a := range acts {
 		if err := d.debriefOne(ctx, a, now); err != nil {
 			slog.Warn("debrief: activity failed", "id", a.ID, "err", err)
+			failures = append(failures, fmt.Errorf("activity %s: %w", a.ID, err))
 		}
 	}
 
 	// Missed sessions: only YESTERDAY (a complete day) is judged.
 	if err := d.missedSessions(ctx, yesterday, acts); err != nil {
 		slog.Warn("debrief: missed-session check failed", "err", err)
+		failures = append(failures, err)
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (d Debrief) debriefOne(ctx context.Context, a icu.Activity, now time.Time) error {
@@ -88,11 +95,12 @@ func (d Debrief) debriefOne(ctx context.Context, a icu.Activity, now time.Time) 
 			return nil // not settled yet; the next sweep picks it up
 		}
 	}
-	fresh, err := d.Marks.MarkOnce(ctx, "act-"+a.ID)
+	key := "act-" + a.ID
+	leaseID, err := d.Marks.Claim(ctx, key)
 	if err != nil {
 		return err
 	}
-	if !fresh {
+	if leaseID == "" {
 		return nil
 	}
 
@@ -103,7 +111,14 @@ func (d Debrief) debriefOne(ctx context.Context, a icu.Activity, now time.Time) 
 	} else {
 		text = "🏁 <b>Debrief</b>\n" + telegram.SanitizeNarrative(narrative) + "\n\n" + block
 	}
-	return d.Out.Send(ctx, text)
+	if err := d.Out.Send(ctx, text); err != nil {
+		rerr := d.Marks.Release(ctx, key, leaseID)
+		return errors.Join(fmt.Errorf("send: %w", err), rerr)
+	}
+	if err := d.Marks.Complete(ctx, key, leaseID); err != nil {
+		return fmt.Errorf("complete after send: %w", err)
+	}
+	return nil
 }
 
 // dataBlock computes the prescribed-vs-executed comparison: all numbers
@@ -181,6 +196,7 @@ func (d Debrief) missedSessions(ctx context.Context, yesterday string, acts []ic
 			executedSports[strings.ToLower(a.Type)] = true
 		}
 	}
+	var failures []error
 	for _, e := range events {
 		if e.Category != "WORKOUT" || e.ExternalID == nil ||
 			!strings.HasPrefix(*e.ExternalID, "cadenza-") {
@@ -190,11 +206,13 @@ func (d Debrief) missedSessions(ctx context.Context, yesterday string, acts []ic
 		if executedSports[sport] {
 			continue
 		}
-		fresh, err := d.Marks.MarkOnce(ctx, "missed-"+*e.ExternalID)
+		key := "missed-" + *e.ExternalID
+		leaseID, err := d.Marks.Claim(ctx, key)
 		if err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("claim %s: %w", key, err))
+			continue
 		}
-		if !fresh {
+		if leaseID == "" {
 			continue
 		}
 		name := "allenamento"
@@ -205,8 +223,12 @@ func (d Debrief) missedSessions(ctx context.Context, yesterday string, acts []ic
 			"🤔 Ieri avevi in programma <b>%s</b> ma non risulta nessuna attività. "+
 				"Tutto ok? Se è saltato dimmelo in chat: meglio riprogrammare che recuperare in fretta.",
 			telegram.Escape(name))); err != nil {
-			return err
+			failures = append(failures, errors.Join(fmt.Errorf("send %s: %w", key, err), d.Marks.Release(ctx, key, leaseID)))
+			continue
+		}
+		if err := d.Marks.Complete(ctx, key, leaseID); err != nil {
+			failures = append(failures, fmt.Errorf("complete %s: %w", key, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }

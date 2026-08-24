@@ -16,6 +16,8 @@ check: lint vet fmt-check vuln test sh-check purity-check
 # Shell scripts get at least a parse check; nothing ships unparseable again.
 sh-check:
 	@for f in deploy/*.sh; do bash -n "$$f" || exit 1; done
+	@python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("deploy").glob("*.py")]'
+	@python3 -m unittest discover -s deploy -p '*_test.py'
 	@echo "sh-check: ok"
 
 # The pure packages (workout, safety, verdict) must never grow I/O or model
@@ -50,7 +52,7 @@ test:
 	go test -race -count=1 ./...
 
 test-e2e:
-	go test -race -count=1 -tags=e2e ./e2e/...
+	REQUIRE_EMULATOR=1 go test -race -count=1 -tags=e2e ./e2e/...
 
 else
 

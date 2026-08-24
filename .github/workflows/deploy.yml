@@ -1,10 +1,15 @@
-# ABOUTME: Keyless deploy to Cloud Run on push to main, via Workload Identity Federation.
+# ABOUTME: Keyless deploy of the exact main SHA only after its CI workflow succeeds.
 # ABOUTME: Secrets referenced by PINNED version; bumping a secret is a deliberate edit here.
 
 name: deploy
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+concurrency:
+  group: cadenza-production
+  cancel-in-progress: false
 
 env:
   REGION: europe-west1
@@ -16,22 +21,41 @@ jobs:
     #   gh variable set DEPLOY_ENABLED --body true
     # A skipped deploy keeps main green; a red one trains everyone to
     # ignore failures on the branch that matters.
-    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    if: >-
+      ${{ vars.DEPLOY_ENABLED == 'true' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Verify tested SHA is still main
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          CURRENT_SHA=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$CURRENT_SHA" = "$TESTED_SHA" || {
+            echo "Refusing stale deploy: tested=$TESTED_SHA current-main=$CURRENT_SHA" >&2
+            exit 1
+          }
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/github/providers/github
           service_account: cadenza-deploy@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3
+      - name: Apply Firestore indexes
+        run: python3 deploy/apply_firestore_indexes.py --project '${{ secrets.GCP_PROJECT }}'
       - name: Build and push image
         run: |
-          gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
-          IMAGE=${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/cadenza/cadenza:${GITHUB_SHA::12}
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          SHA='${{ github.event.workflow_run.head_sha }}'
+          IMAGE=${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/cadenza/cadenza:${SHA::12}
           docker build -t "$IMAGE" .
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
@@ -42,8 +66,7 @@ jobs:
           image: ${{ env.IMAGE }}
           flags: >-
             --service-account=cadenza-run@${{ secrets.GCP_PROJECT }}.iam.gserviceaccount.com
-            --allow-unauthenticated
-            --min-instances=0 --max-instances=1
+            --min-instances=0 --max-instances=1 --concurrency=1
             --timeout=600 --memory=512Mi --cpu-boost
           env_vars: |
             ENV=prod

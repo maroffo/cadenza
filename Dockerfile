@@ -1,7 +1,7 @@
 # ABOUTME: Two-stage build: static Go binary on distroless, nonroot.
 # ABOUTME: Image size is irrelevant to Cloud Run cold start (image streaming), correctness is not.
 
-FROM golang:1.26 AS build
+FROM golang:1.26.6 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

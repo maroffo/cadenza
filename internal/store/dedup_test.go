@@ -5,6 +5,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,9 +44,9 @@ func TestDedupReserve_RejectsInvalidKeys(t *testing.T) {
 		".dotfirst",                    // must start alphanumeric
 		"x" + strings.Repeat("a", 200), // over length cap (201 chars)
 	} {
-		ok, err := d.Reserve(ctx, key, time.Hour)
-		if err == nil || ok {
-			t.Errorf("Reserve(%q) = %v, %v; want false, validation error", key, ok, err)
+		leaseID, err := d.Reserve(ctx, key, time.Hour)
+		if err == nil || leaseID != "" {
+			t.Errorf("Reserve(%q) = %q, %v; want empty token, validation error", key, leaseID, err)
 		}
 	}
 }
@@ -54,9 +55,9 @@ func TestDedupReserve_RejectsNonPositiveTTL(t *testing.T) {
 	d := NewDedup(nil)
 	ctx := context.Background()
 	for _, ttl := range []time.Duration{0, -time.Hour} {
-		ok, err := d.Reserve(ctx, "valid-key", ttl)
-		if err == nil || ok {
-			t.Errorf("Reserve(ttl=%v) = %v, %v; want false, validation error", ttl, ok, err)
+		leaseID, err := d.Reserve(ctx, "valid-key", ttl)
+		if err == nil || leaseID != "" {
+			t.Errorf("Reserve(ttl=%v) = %q, %v; want empty token, validation error", ttl, leaseID, err)
 		}
 	}
 }
@@ -77,7 +78,7 @@ func TestDedupReserve_AcceptsRealKeyShapes(t *testing.T) {
 	}
 }
 
-func TestDedupReserve_FirstWinsReplayNoops(t *testing.T) {
+func TestDedupReserve_ProcessingThenCompleted(t *testing.T) {
 	client := emulatorClient(t)
 	d := NewDedup(client)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -85,19 +86,26 @@ func TestDedupReserve_FirstWinsReplayNoops(t *testing.T) {
 	key := fmt.Sprintf("tg-update-%d", time.Now().UnixNano())
 
 	first, err := d.Reserve(ctx, key, 7*24*time.Hour)
-	if err != nil {
-		t.Fatalf("first Reserve: %v", err)
+	if err != nil || first == "" {
+		t.Fatalf("first Reserve = %q, %v; want token,nil", first, err)
 	}
-	if !first {
-		t.Fatal("first Reserve = false, want true")
-	}
-
 	second, err := d.Reserve(ctx, key, 7*24*time.Hour)
-	if err != nil {
-		t.Fatalf("second Reserve: %v", err)
+	if second != "" || !errors.Is(err, ErrDedupInProgress) {
+		t.Fatalf("live processing Reserve = %q,%v; want empty,ErrDedupInProgress", second, err)
 	}
-	if second {
-		t.Fatal("second Reserve = true, want false (duplicate must no-op)")
+	if err := d.Complete(ctx, key, first); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	third, err := d.Reserve(ctx, key, 7*24*time.Hour)
+	if err != nil || third != "" {
+		t.Fatalf("completed Reserve = %q,%v; want empty,nil", third, err)
+	}
+	if err := d.Release(ctx, key, first); err != nil {
+		t.Fatalf("late Release: %v", err)
+	}
+	fourth, err := d.Reserve(ctx, key, 7*24*time.Hour)
+	if err != nil || fourth != "" {
+		t.Fatalf("release erased completion: Reserve=%q,%v", fourth, err)
 	}
 }
 
@@ -117,12 +125,12 @@ func TestDedupReserve_ConcurrentSingleWinner(t *testing.T) {
 	errs := make(chan error, n)
 	for range n {
 		wg.Go(func() {
-			ok, err := d.Reserve(ctx, key, time.Hour)
+			leaseID, err := d.Reserve(ctx, key, time.Hour)
 			if err != nil {
 				errs <- err
 				return
 			}
-			wins <- ok
+			wins <- leaseID != ""
 		})
 	}
 	wg.Wait()
@@ -130,7 +138,9 @@ func TestDedupReserve_ConcurrentSingleWinner(t *testing.T) {
 	close(errs)
 
 	for err := range errs {
-		t.Fatalf("concurrent Reserve error: %v", err)
+		if !errors.Is(err, ErrDedupInProgress) {
+			t.Fatalf("concurrent Reserve error: %v", err)
+		}
 	}
 	winners := 0
 	for ok := range wins {
@@ -143,6 +153,38 @@ func TestDedupReserve_ConcurrentSingleWinner(t *testing.T) {
 	}
 }
 
+func TestDedupReserve_ExpiredLeaseIsReclaimedAndStaleOwnerIsFenced(t *testing.T) {
+	client := emulatorClient(t)
+	d := NewDedup(client)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	key := fmt.Sprintf("lease-%d", time.Now().UnixNano())
+	base := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	d.now = func() time.Time { return base }
+
+	first, err := d.Reserve(ctx, key, time.Hour)
+	if err != nil || first == "" {
+		t.Fatalf("initial Reserve = %q,%v", first, err)
+	}
+	d.now = func() time.Time { return base.Add(dedupLease + time.Second) }
+	second, err := d.Reserve(ctx, key, time.Hour)
+	if err != nil || second == "" || second == first {
+		t.Fatalf("expired lease Reserve = %q,%v; want fresh token", second, err)
+	}
+	if err := d.Release(ctx, key, first); err != nil {
+		t.Fatalf("stale Release: %v", err)
+	}
+	if token, err := d.Reserve(ctx, key, time.Hour); token != "" || !errors.Is(err, ErrDedupInProgress) {
+		t.Fatalf("stale release erased replacement: Reserve=%q,%v", token, err)
+	}
+	if err := d.Complete(ctx, key, first); !errors.Is(err, ErrDedupLeaseLost) {
+		t.Fatalf("stale Complete = %v, want ErrDedupLeaseLost", err)
+	}
+	if err := d.Complete(ctx, key, second); err != nil {
+		t.Fatalf("replacement Complete: %v", err)
+	}
+}
+
 func TestDedupReserve_ErrorIsNotADuplicate(t *testing.T) {
 	// false+error means UNKNOWN: callers must be able to distinguish it from
 	// false+nil (duplicate). A canceled context must surface as an error.
@@ -151,9 +193,9 @@ func TestDedupReserve_ErrorIsNotADuplicate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	ok, err := d.Reserve(ctx, fmt.Sprintf("dead-%d", time.Now().UnixNano()), time.Hour)
-	if ok {
-		t.Fatal("Reserve on canceled context = true, want false")
+	leaseID, err := d.Reserve(ctx, fmt.Sprintf("dead-%d", time.Now().UnixNano()), time.Hour)
+	if leaseID != "" {
+		t.Fatal("Reserve on canceled context returned a token")
 	}
 	if err == nil {
 		t.Fatal("Reserve on canceled context returned nil error; callers cannot distinguish duplicate from failure")
@@ -167,11 +209,11 @@ func TestDedupReserve_DistinctKeysIndependent(t *testing.T) {
 	defer cancel()
 
 	a, err := d.Reserve(ctx, fmt.Sprintf("a-%d", time.Now().UnixNano()), time.Hour)
-	if err != nil || !a {
-		t.Fatalf("Reserve a = %v, %v; want true, nil", a, err)
+	if err != nil || a == "" {
+		t.Fatalf("Reserve a = %q, %v; want token, nil", a, err)
 	}
 	b, err := d.Reserve(ctx, fmt.Sprintf("b-%d", time.Now().UnixNano()), time.Hour)
-	if err != nil || !b {
-		t.Fatalf("Reserve b = %v, %v; want true, nil", b, err)
+	if err != nil || b == "" {
+		t.Fatalf("Reserve b = %q, %v; want token, nil", b, err)
 	}
 }

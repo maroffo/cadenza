@@ -22,6 +22,10 @@ const injuriesCollection = "injuries"
 // injuryRetention mirrors the other health-data stores: 18 months TTL.
 const injuryRetention = 18 * 30 * 24 * time.Hour
 
+// worsePainFloor is the deterministic verdict's active-injury threshold. A
+// "worse" tap must tighten the same numeric signal consumed by the verdict.
+const worsePainFloor = 4
+
 // ErrInjuryNotFound marks operations on unknown ids: callers answer the
 // athlete honestly instead of confirming actions on ghosts.
 var ErrInjuryNotFound = fmt.Errorf("injury not found")
@@ -160,16 +164,31 @@ func (i *Injuries) ListOpen(ctx context.Context) ([]Injury, error) {
 func (i *Injuries) RecordFeedback(ctx context.Context, id, feedback string) error {
 	ref := i.client.Collection(injuriesCollection).Doc(id)
 	err := i.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
-		_, err := tx.Get(ref)
+		snap, err := tx.Get(ref)
 		if status.Code(err) == codes.NotFound {
 			return ErrInjuryNotFound
 		}
 		if err != nil {
 			return err
 		}
-		return tx.Set(ref, map[string]any{
+		var inj Injury
+		if err := snap.DataTo(&inj); err != nil {
+			return err
+		}
+		update := map[string]any{
 			"last_feedback": feedback, "last_feedback_at": time.Now().UTC(),
-		}, firestore.MergeAll)
+		}
+		if feedback == "worse" {
+			pain := inj.Pain + 1
+			if pain < worsePainFloor {
+				pain = worsePainFloor
+			}
+			if pain > 10 {
+				pain = 10
+			}
+			update["pain"] = pain
+		}
+		return tx.Set(ref, update, firestore.MergeAll)
 	})
 	if err != nil {
 		if errors.Is(err, ErrInjuryNotFound) {

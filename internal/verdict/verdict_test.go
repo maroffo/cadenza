@@ -4,6 +4,7 @@
 package verdict
 
 import (
+	"math"
 	"strings"
 	"testing"
 )
@@ -215,6 +216,85 @@ func TestCompute_Scenarios(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCompute_NonFiniteRampCapFailsClosed(t *testing.T) {
+	for name, cap := range map[string]float64{
+		"nan": math.NaN(), "positive_inf": math.Inf(1), "negative_inf": math.Inf(-1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := greenDay("2026-06-10")
+			v := Compute(Input{Today: d, Baselines: baselines, RampCap: cap}, DefaultRules())
+			if v.Kind == Go {
+				t.Fatalf("non-finite cap %v allowed GO", cap)
+			}
+			if !hasRule(v, "invalid_ramp_cap") || !hasRule(v, "ramp_over_cap") {
+				t.Fatalf("rules = %+v, want invalid_ramp_cap + ramp_over_cap", v.Reasons)
+			}
+		})
+	}
+}
+
+func TestCompute_SkipRulesAlwaysHaveBothCaps(t *testing.T) {
+	cases := map[string]func(*Day){
+		"readiness_very_low": func(d *Day) { d.Readiness = f(20) },
+		"spo2_very_low":      func(d *Day) { d.SpO2 = f(85) },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := greenDay("2026-06-10")
+			mutate(&d)
+			v := Compute(Input{Today: d, Baselines: baselines, RampCap: 4}, DefaultRules())
+			if v.Kind != Skip {
+				t.Fatalf("Kind = %s, want SKIP", v.Kind)
+			}
+			if v.Caps.MaxZone == 0 || v.Caps.MaxMinutes == 0 {
+				t.Fatalf("SKIP caps = %+v, both axes must be bounded", v.Caps)
+			}
+		})
+	}
+}
+
+func TestRuleCapsAreCompleteAndUnknownRulesFailClosed(t *testing.T) {
+	for ruleID, caps := range capsFor {
+		if caps.MaxZone == 0 || caps.MaxMinutes == 0 {
+			t.Errorf("rule %s has an unbounded cap: %+v", ruleID, caps)
+		}
+	}
+	for ruleID := range skipRules {
+		caps, ok := capsFor[ruleID]
+		if !ok || caps.MaxZone == 0 || caps.MaxMinutes == 0 {
+			t.Errorf("SKIP rule %s lacks both explicit caps: %+v", ruleID, caps)
+		}
+	}
+
+	v := Verdict{Kind: Go}
+	v.fire("future_unmapped_rule", "test", "observed", "threshold")
+	if v.Kind != Modify || v.Caps.MaxZone == 0 || v.Caps.MaxMinutes == 0 {
+		t.Fatalf("unmapped rule failed open: %+v", v)
+	}
+}
+
+func TestCompute_InjuryRegistryGapIsConservative(t *testing.T) {
+	v := Compute(Input{
+		Today: greenDay("2026-06-10"), Baselines: baselines, RampCap: 4,
+		DataGapInjuries: true,
+	}, DefaultRules())
+	if v.Kind != Modify || !hasRule(v, "injury_registry_unavailable") {
+		t.Fatalf("verdict = %+v, want conservative MODIFY", v)
+	}
+	if v.Caps.MaxZone == 0 || v.Caps.MaxMinutes == 0 {
+		t.Fatalf("caps = %+v, want bounded recovery", v.Caps)
+	}
+}
+
+func hasRule(v Verdict, id string) bool {
+	for _, r := range v.Reasons {
+		if r.RuleID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompute_CapsAreRestrictive(t *testing.T) {

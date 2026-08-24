@@ -73,13 +73,14 @@ Planned packages (M2+): `workout` (step schema + DSL renderer), `safety` (bounds
 
 ## Development
 
-Prerequisites: Go 1.26+, Docker (Firestore emulator + image builds), `golangci-lint`, `govulncheck`.
+Prerequisites: Go 1.26.6+, Docker (Firestore emulator + image builds), `golangci-lint`, `govulncheck`.
 
 ```bash
-cp .env.example .env        # fill in what you have; dev boots with nothing
+cp .env.example .env        # fill the required local values
+set -a; source .env; set +a # the app reads process env; it has no dotenv loader
 make check                  # lint + vet + fmt + vulncheck + race tests
-make test-e2e               # end-to-end suite (-tags=e2e)
-make emulator               # Firestore emulator via Docker on :8090 (no Java needed)
+make emulator               # terminal 1: Firestore emulator via Docker on :8090
+FIRESTORE_EMULATOR_HOST=localhost:8090 make test-e2e  # terminal 2; fails closed without emulator
 ```
 
 Test tiers:
@@ -89,13 +90,13 @@ Test tiers:
 | Unit | `make check` | nothing |
 | Emulator | `FIRESTORE_EMULATOR_HOST=localhost:8090 go test ./internal/store/...` | `make emulator` running; set `REQUIRE_EMULATOR=1` in CI so skips become failures |
 | Integration (live API, read-only) | `INTERVALS_API_KEY=... go test -tags=integration ./internal/icu/` | intervals.icu API key |
-| e2e | `make test-e2e` | nothing (fakes; grows emulator + fake Anthropic from M2) |
+| e2e | `FIRESTORE_EMULATOR_HOST=localhost:8090 make test-e2e` | `make emulator` running; the target fails closed when it is absent |
 
 The pre-commit hook runs `make check && make test-e2e`; commits on `main`/`master` are blocked. Flow: feature branch → PR → `dev` → `main`.
 
 ## Deployment (M2)
 
-Target stack: one Cloud Run service (max-instances 1), a Cloud Tasks queue with concurrency 1 (per-chat serialization and spend control), three Cloud Scheduler jobs (morning check 09:00 Europe/Rome, watchdog 09:15, reconcile 12:00), Firestore, Secret Manager with pinned secret versions, log-based Monitoring alerts to email, GitHub Actions deploy via Workload Identity Federation. Provisioning is an idempotent `deploy/setup.sh` (gcloud, describe-before-create); every command doubles as runbook documentation.
+Target stack: one Cloud Run service (max-instances 1, concurrency 1), a Cloud Tasks queue with concurrency 1 (per-chat serialization and spend control), Cloud Scheduler jobs for morning check (09:00 Europe/Rome), early/final watchdog (09:15 and 10:45), reconcile (12:00) and debrief (19:30), Firestore, Secret Manager with pinned secret versions, log-based Monitoring alerts to email, GitHub Actions deploy via Workload Identity Federation. Provisioning is an idempotent `deploy/setup.sh` (gcloud, describe-before-create); every command doubles as runbook documentation.
 
 Expected running cost: GCP roughly zero at single-athlete volume; the Anthropic API is the only real spend, capped from the console.
 

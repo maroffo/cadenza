@@ -26,7 +26,7 @@ func TestDispatch_RoutesTelegramUpdate(t *testing.T) {
 	if err := d.Dispatch(context.Background(), env); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	if !dedup.reserved[env.ID] {
-		t.Fatal("telegram_update not routed to Message handler")
+	if !dedup.completed[env.ID] {
+		t.Fatal("telegram_update not routed and completed by Message handler")
 	}
 }

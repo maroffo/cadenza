@@ -400,6 +400,22 @@ func TestSuggestFailsClosedOnUnresolvedIngredient(t *testing.T) {
 	}
 }
 
+func TestValidateRecipeRejectsNonFiniteAndNonPositiveNumbers(t *testing.T) {
+	b := book(t)
+	for name, r := range map[string]Recipe{
+		"nan portions":      {ID: "x", Porzioni: math.NaN(), Ingredienti: []Ingredient{{Food: "banana", Qta: 1, Unita: "pz"}}},
+		"infinite portions": {ID: "x", Porzioni: math.Inf(1), Ingredienti: []Ingredient{{Food: "banana", Qta: 1, Unita: "pz"}}},
+		"negative quantity": {ID: "x", Porzioni: 1, Ingredienti: []Ingredient{{Food: "banana", Qta: -1, Unita: "pz"}}},
+		"nan quantity":      {ID: "x", Porzioni: 1, Ingredienti: []Ingredient{{Food: "banana", Qta: math.NaN(), Unita: "pz"}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if problems := b.ValidateRecipe(r); len(problems) == 0 {
+				t.Fatalf("ValidateRecipe accepted %+v", r)
+			}
+		})
+	}
+}
+
 func TestSuggestPersonalBypassesFamilyAllergen(t *testing.T) {
 	lact := Ingredient{Food: "yogurt_greco_0", Qta: 100, Unita: "g"} // milk + lactose
 	b := rawBook(
