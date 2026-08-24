@@ -26,6 +26,21 @@ class IndexProvisionerTest(unittest.TestCase):
             ],
         }
 
+    def test_run_json_reports_gcloud_stderr(self) -> None:
+        failed = mock.Mock(returncode=2, stdout="", stderr="unsupported flag")
+        with mock.patch.object(indexes.subprocess, "run", return_value=failed):
+            with self.assertRaisesRegex(RuntimeError, "unsupported flag"):
+                indexes.run_json(["gcloud", "firestore"])
+
+    def test_list_uses_supported_collection_group_filter(self) -> None:
+        with mock.patch.object(indexes, "run_json", return_value=[]) as run_json:
+            self.assertEqual(
+                indexes.list_indexes("project", "(default)", "events_written"), []
+            )
+        args = run_json.call_args.args[0]
+        self.assertIn("--filter=COLLECTION_GROUP:events_written", args)
+        self.assertFalse(any(arg.startswith("--collection-group") for arg in args))
+
     def test_matching_ignores_only_implicit_name_field(self) -> None:
         current = {
             **self.desired,
