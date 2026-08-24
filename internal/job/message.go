@@ -18,11 +18,12 @@ import (
 	"github.com/maroffo/cadenza/internal/verdict"
 )
 
-// DedupStore reserves side-effect keys; satisfied by store.Dedup. Release
-// compensates failures after Reserve so redeliveries are not silently lost.
+// DedupStore reserves side-effect keys with a fenced lease; satisfied by
+// store.Dedup. Complete/Release require the token returned to the owner.
 type DedupStore interface {
-	Reserve(ctx context.Context, key string, ttl time.Duration) (bool, error)
-	Release(ctx context.Context, key string) error
+	Reserve(ctx context.Context, key string, ttl time.Duration) (string, error)
+	Complete(ctx context.Context, key, leaseID string) error
+	Release(ctx context.Context, key, leaseID string) error
 }
 
 // ChatStore persists the chat id at /start; satisfied by store.Chats.
@@ -69,7 +70,12 @@ type Message struct {
 	WebLink func() string
 }
 
-const dedupTTL = 7 * 24 * time.Hour
+const (
+	dedupTTL = 7 * 24 * time.Hour
+	// Bound the whole claimed update below store's five-minute lease and the
+	// 600s Cloud Run deadline. Agent calls have their own tighter total bound.
+	messageWorkTimeout = 4 * time.Minute
+)
 
 // tgUpdate models only the fields cadenza reads. Two producers feed it: the
 // webhook (raw Telegram body) and dev polling (marshaled go-telegram update);
@@ -95,22 +101,38 @@ type tgUpdate struct {
 }
 
 func (m Message) Run(ctx context.Context, env task.Envelope) error {
-	owned, err := m.Dedup.Reserve(ctx, env.ID, dedupTTL)
+	leaseID, err := m.Dedup.Reserve(ctx, env.ID, dedupTTL)
 	if err != nil {
 		return fmt.Errorf("message: dedup: %w", err)
 	}
-	if !owned {
+	if leaseID == "" {
 		slog.Info("message: duplicate update, no-op", "id", env.ID)
 		return nil
 	}
 
-	err = m.handle(ctx, env)
-	if err != nil && !errors.Is(err, task.ErrPoison) {
-		// Transient failure after the reservation: release it, or the
-		// redelivery would no-op and the update would be lost forever.
-		if rerr := m.Dedup.Release(ctx, env.ID); rerr != nil {
-			slog.Error("message: release after failure", "id", env.ID, "err", rerr)
+	workCtx, cancel := context.WithTimeout(ctx, messageWorkTimeout)
+	defer cancel()
+	err = m.handle(workCtx, env)
+	if err == nil || errors.Is(err, task.ErrPoison) {
+		// Poison is terminal too: consume it permanently so a malformed update
+		// cannot loop forever. Completion happens only after handling finishes.
+		if cerr := m.Dedup.Complete(ctx, env.ID, leaseID); cerr != nil {
+			if errors.Is(cerr, store.ErrDedupLeaseLost) {
+				// A newer fenced owner is responsible for completion. Retrying this
+				// stale attempt would only contend with it or duplicate its work.
+				slog.Warn("message: completion skipped after lease loss", "id", env.ID)
+				return err
+			}
+			return fmt.Errorf("message: dedup complete: %w", cerr)
 		}
+		return err
+	}
+
+	// Transient failure after the reservation: release it, or the redelivery
+	// would wait for lease expiry instead of retrying immediately. The token
+	// fences a late worker from deleting a replacement claim.
+	if rerr := m.Dedup.Release(ctx, env.ID, leaseID); rerr != nil {
+		slog.Error("message: release after failure", "id", env.ID, "err", rerr)
 	}
 	return err
 }

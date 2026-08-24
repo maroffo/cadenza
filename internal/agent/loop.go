@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -18,7 +20,12 @@ import (
 
 // maxIterations bounds the loop: a model that keeps calling tools past this
 // is a bug or a runaway, and every iteration costs real money.
-const maxIterations = 10
+const (
+	maxIterations = 10
+	// Each Messages.New must finish well before Cloud Run's 600s request
+	// timeout, leaving room for deterministic fallback and delivery.
+	anthropicHTTPTimeout = 2 * time.Minute
+)
 
 // Client wraps the SDK client so tests can point it at fakeanthropic.
 type Client struct {
@@ -28,7 +35,10 @@ type Client struct {
 // NewClient builds a client; baseURL is overridable for tests and e2e
 // (empty means the real API).
 func NewClient(apiKey, baseURL string) Client {
-	opts := []option.RequestOption{option.WithAPIKey(apiKey)}
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+		option.WithHTTPClient(&http.Client{Timeout: anthropicHTTPTimeout}),
+	}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
@@ -43,6 +53,11 @@ type Tool struct {
 	// Handler receives the tool_use id: side effects keyed on it stay
 	// idempotent across loop retries (e.g. mutation proposals).
 	Handler func(ctx context.Context, toolUseID string, input json.RawMessage) (string, error)
+	// EffectNotice derives a code-owned user notice after a successful
+	// handler. It must never return model-authored or arbitrary tool output.
+	// Notices survive a later model-call failure in Result.Effects. This is
+	// an in-memory journal, not a durable transactional outbox.
+	EffectNotice func(toolOutput string) string
 }
 
 type Tools map[string]Tool
@@ -62,6 +77,9 @@ type Request struct {
 	Cache     bool
 	Thinking  bool
 	Effort    string // "", "low", "medium", "high", "xhigh", "max"
+	// BeforeCall runs immediately before every Messages.New invocation. Deep
+	// tier uses it to charge the daily request budget per loop iteration.
+	BeforeCall func(context.Context) error
 }
 
 // Usage mirrors the API counters; CacheRead is what proves the prefix
@@ -81,6 +99,9 @@ type Result struct {
 	StopReason string
 	Transcript []anthropic.MessageParam
 	Usage      Usage
+	// Effects contains only code-owned notices emitted by registered tools.
+	// It is returned even with an error after a later model invocation.
+	Effects []string
 }
 
 // Run executes the tool loop.
@@ -120,22 +141,40 @@ func Run(ctx context.Context, c Client, req Request, tools Tools) (Result, error
 		params.OutputConfig = anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(req.Effort)}
 	}
 
+	var usage Usage
+	var effects []string
+	partial := func() Result {
+		return Result{Transcript: params.Messages, Usage: usage, Effects: append([]string(nil), effects...)}
+	}
+
 	for range maxIterations {
+		if req.BeforeCall != nil {
+			if err := req.BeforeCall(ctx); err != nil {
+				return partial(), fmt.Errorf("agent: before messages: %w", err)
+			}
+		}
 		resp, err := c.api.Messages.New(ctx, params)
 		if err != nil {
-			return Result{}, fmt.Errorf("agent: messages: %w", err)
+			return partial(), fmt.Errorf("agent: messages: %w", err)
 		}
+		usage.InputTokens += resp.Usage.InputTokens
+		usage.OutputTokens += resp.Usage.OutputTokens
+		usage.CacheRead += resp.Usage.CacheReadInputTokens
+		usage.CacheCreation += resp.Usage.CacheCreationInputTokens
 
 		switch resp.StopReason {
 		case anthropic.StopReasonToolUse:
 			params.Messages = append(params.Messages, resp.ToParam())
-			params.Messages = append(params.Messages, anthropic.NewUserMessage(toolResults(ctx, resp, tools)...))
+			blocks, notices := toolResults(ctx, resp, tools)
+			effects = append(effects, notices...)
+			params.Messages = append(params.Messages, anthropic.NewUserMessage(blocks...))
 		case anthropic.StopReasonPauseTurn:
 			// Long-running turn paused server-side: re-send as-is.
 			params.Messages = append(params.Messages, resp.ToParam())
 		case anthropic.StopReasonRefusal:
 			// Never auto-retry a refusal; the caller falls back deterministically.
-			return Result{}, fmt.Errorf("agent: model refused the request")
+			params.Messages = append(params.Messages, resp.ToParam())
+			return partial(), fmt.Errorf("agent: model refused the request")
 		default:
 			// end_turn or max_tokens: take whatever text we have.
 			if resp.StopReason == anthropic.StopReasonMaxTokens {
@@ -144,29 +183,22 @@ func Run(ctx context.Context, c Client, req Request, tools Tools) (Result, error
 				slog.Warn("agent: response truncated at max_tokens", "model", req.Model)
 			}
 			text := collectText(resp)
-			if text == "" {
-				return Result{}, fmt.Errorf("agent: empty response (stop_reason %s)", resp.StopReason)
-			}
 			params.Messages = append(params.Messages, resp.ToParam())
-			usage := Usage{
-				InputTokens:   resp.Usage.InputTokens,
-				OutputTokens:  resp.Usage.OutputTokens,
-				CacheRead:     resp.Usage.CacheReadInputTokens,
-				CacheCreation: resp.Usage.CacheCreationInputTokens,
+			if text == "" {
+				return partial(), fmt.Errorf("agent: empty response (stop_reason %s)", resp.StopReason)
 			}
-			// The cache claim is verified here, in logs, not assumed (decision 10).
+			// Usage is cumulative across every tool/pause iteration, not just
+			// the final response.
 			slog.Info("agent: usage",
 				"model", req.Model, "input", usage.InputTokens, "output", usage.OutputTokens,
 				"cache_read", usage.CacheRead, "cache_creation", usage.CacheCreation)
-			return Result{
-				Text:       text,
-				StopReason: string(resp.StopReason),
-				Transcript: params.Messages,
-				Usage:      usage,
-			}, nil
+			res := partial()
+			res.Text = text
+			res.StopReason = string(resp.StopReason)
+			return res, nil
 		}
 	}
-	return Result{}, fmt.Errorf("agent: iteration cap (%d) reached, aborting loop", maxIterations)
+	return partial(), fmt.Errorf("agent: iteration cap (%d) reached, aborting loop", maxIterations)
 }
 
 func collectText(resp *anthropic.Message) string {
@@ -181,8 +213,9 @@ func collectText(resp *anthropic.Message) string {
 
 // toolResults answers EVERY tool_use block: a missing tool_result for any id
 // makes the API reject the next request, wedging the loop.
-func toolResults(ctx context.Context, resp *anthropic.Message, tools Tools) []anthropic.ContentBlockParamUnion {
+func toolResults(ctx context.Context, resp *anthropic.Message, tools Tools) ([]anthropic.ContentBlockParamUnion, []string) {
 	var results []anthropic.ContentBlockParamUnion
+	var notices []string
 	for _, block := range resp.Content {
 		tu, ok := block.AsAny().(anthropic.ToolUseBlock)
 		if !ok {
@@ -201,8 +234,13 @@ func toolResults(ctx context.Context, resp *anthropic.Message, tools Tools) []an
 			continue
 		}
 		results = append(results, anthropic.NewToolResultBlock(tu.ID, out, false))
+		if tool.EffectNotice != nil {
+			if notice := strings.TrimSpace(tool.EffectNotice(out)); notice != "" {
+				notices = append(notices, notice)
+			}
+		}
 	}
-	return results
+	return results, notices
 }
 
 // toolParams serializes the registry in SORTED name order: tools sit at

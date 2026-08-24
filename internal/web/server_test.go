@@ -516,6 +516,33 @@ func TestWeb_RecipeCreateRejectsUnknownFood(t *testing.T) {
 	}
 }
 
+func TestWeb_RecipeCreateRejectsNonFiniteOrNonPositiveNumbers(t *testing.T) {
+	cases := map[string]url.Values{
+		"nan portions": {
+			"id": {"nan-portions"}, "nome": {"x"}, "categoria": {"primo"}, "porzioni": {"NaN"},
+			"ingredienti": {"banana | 1 | pz"},
+		},
+		"infinite quantity": {
+			"id": {"inf-quantity"}, "nome": {"x"}, "categoria": {"primo"}, "porzioni": {"1"},
+			"ingredienti": {"banana | +Inf | pz"},
+		},
+		"negative quantity": {
+			"id": {"negative-quantity"}, "nome": {"x"}, "categoria": {"primo"}, "porzioni": {"1"},
+			"ingredienti": {"banana | -1 | pz"},
+		},
+	}
+	for name, form := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, _, _, _, _, sess := testServer()
+			ra := s.Recipes.(*stubRecipeAdmin)
+			rec := authedRequest(t, s, sess, http.MethodPost, "/app/recipes", form)
+			if rec.Code != http.StatusOK || len(ra.saved) != 0 {
+				t.Fatalf("invalid numeric recipe persisted: code=%d saved=%+v body=%s", rec.Code, ra.saved, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestWeb_RecipeCreateRejectsBadID(t *testing.T) {
 	s, _, _, _, _, sess := testServer()
 	ra := s.Recipes.(*stubRecipeAdmin)

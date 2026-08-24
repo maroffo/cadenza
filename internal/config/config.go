@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,7 +70,7 @@ func Load(getenv func(string) string) (*Config, error) {
 
 	if raw := getenv("ICU_RATE_PER_SEC"); raw != "" {
 		rate, err := strconv.ParseFloat(raw, 64)
-		if err != nil || rate <= 0 {
+		if err != nil || rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
 			return nil, fmt.Errorf("ICU_RATE_PER_SEC: invalid value %q", raw)
 		}
 		cfg.ICURatePerSec = rate

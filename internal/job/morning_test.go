@@ -67,14 +67,17 @@ func (s *stubMessenger) Send(_ context.Context, body string) error {
 }
 
 type stubRuns struct {
-	completed map[string]string
-	deferred  map[string]int
-	checkErr  error
-	markErr   error
+	completed     map[string]string
+	deferred      map[string]int
+	deferredUntil map[string]time.Time
+	checkErr      error
+	markErr       error
 }
 
 func newStubRuns() *stubRuns {
-	return &stubRuns{completed: map[string]string{}, deferred: map[string]int{}}
+	return &stubRuns{
+		completed: map[string]string{}, deferred: map[string]int{}, deferredUntil: map[string]time.Time{},
+	}
 }
 
 func (s *stubRuns) MorningCompleted(_ context.Context, date string) (bool, error) {
@@ -85,13 +88,13 @@ func (s *stubRuns) MorningCompleted(_ context.Context, date string) (bool, error
 	return ok, nil
 }
 
-func (s *stubRuns) MorningAlive(_ context.Context, date string) (bool, error) {
+func (s *stubRuns) MorningAlive(_ context.Context, date string, now time.Time) (bool, error) {
 	if s.checkErr != nil {
 		return false, s.checkErr
 	}
 	_, done := s.completed[date]
-	_, def := s.deferred[date]
-	return done || def, nil
+	until, def := s.deferredUntil[date]
+	return done || (def && now.Before(until)), nil
 }
 
 func (s *stubRuns) MarkMorningCompleted(_ context.Context, date, status string) error {
@@ -102,11 +105,12 @@ func (s *stubRuns) MarkMorningCompleted(_ context.Context, date, status string) 
 	return nil
 }
 
-func (s *stubRuns) MarkMorningDeferred(_ context.Context, date string, attempt int) error {
+func (s *stubRuns) MarkMorningDeferred(_ context.Context, date string, attempt int, until time.Time) error {
 	if s.markErr != nil {
 		return s.markErr
 	}
 	s.deferred[date] = attempt
+	s.deferredUntil[date] = until
 	return nil
 }
 
@@ -467,12 +471,16 @@ func TestMorning_RetryScheduleFailurePropagates(t *testing.T) {
 	if len(out.bodies) != 0 {
 		t.Fatal("must not send when deferral failed")
 	}
+	if len(runs.deferred) != 0 {
+		t.Fatalf("failed enqueue left a live deferred marker: %v", runs.deferred)
+	}
 }
 
 func TestWatchdog_QuietWhileRetryInFlight(t *testing.T) {
 	out := &stubMessenger{}
 	runs := newStubRuns()
 	runs.deferred["2026-06-10"] = 1
+	runs.deferredUntil["2026-06-10"] = fixedNow().Add(time.Minute)
 	w := Watchdog{Runs: runs, Out: out, Now: fixedNow, TZ: testTZ}
 
 	if err := w.Run(context.Background()); err != nil {
@@ -480,6 +488,21 @@ func TestWatchdog_QuietWhileRetryInFlight(t *testing.T) {
 	}
 	if len(out.plain) != 0 {
 		t.Fatal("watchdog alerted during an in-flight HRV retry (false alarm)")
+	}
+}
+
+func TestWatchdog_AlertsOnStaleDeferral(t *testing.T) {
+	out := &stubMessenger{}
+	runs := newStubRuns()
+	runs.deferred["2026-06-10"] = 1
+	runs.deferredUntil["2026-06-10"] = fixedNow().Add(-time.Minute)
+	w := Watchdog{Runs: runs, Out: out, Now: fixedNow, TZ: testTZ}
+
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(out.plain) != 1 {
+		t.Fatalf("stale deferral kept watchdog quiet: messages=%v", out.plain)
 	}
 }
 
@@ -719,6 +742,7 @@ func TestMorning_InjuryRegistryDownIsAGap(t *testing.T) {
 	runs := newStubRuns()
 	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, runs)
 	m.Injuries = stubOpenInjuries{err: errors.New("firestore down")}
+	m.Exercises = exercises.MustLoad()
 
 	if err := m.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v (registry blip must not kill the morning)", err)
@@ -731,6 +755,12 @@ func TestMorning_InjuryRegistryDownIsAGap(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("injury gap not in verdict: %+v", out.verdicts[0].DataGaps)
+	}
+	if v := out.verdicts[0]; v.Kind != verdict.Modify || v.Caps.MaxZone == 0 || v.Caps.MaxMinutes == 0 {
+		t.Fatalf("registry failure verdict = %+v, want bounded MODIFY", v)
+	}
+	if strings.Contains(out.bodies[0], "Prevenzione") {
+		t.Errorf("generic routine present while injury registry is unavailable:\n%s", out.bodies[0])
 	}
 }
 
@@ -866,6 +896,40 @@ func TestMorning_RoutineAppendedWhenCatalogWired(t *testing.T) {
 	}
 	if out2.bodies[0] != body {
 		t.Errorf("routine not deterministic across runs:\n--- run1 ---\n%s\n--- run2 ---\n%s", body, out2.bodies[0])
+	}
+}
+
+func TestMorning_SkipDoesNotAppendRoutine(t *testing.T) {
+	out := &stubMessenger{}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, newStubRuns())
+	m.Exercises = exercises.MustLoad()
+	m.Injuries = stubOpenInjuries{open: []store.Injury{{BodyPart: "polpaccio", Pain: 6, Status: "open"}}}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.verdicts[0].Kind != verdict.Skip {
+		t.Fatalf("verdict = %s, want SKIP", out.verdicts[0].Kind)
+	}
+	if strings.Contains(out.bodies[0], "Prevenzione") {
+		t.Errorf("routine block present on SKIP day:\n%s", out.bodies[0])
+	}
+}
+
+func TestMorning_OpenLowPainInjuryDoesNotAppendGenericRoutine(t *testing.T) {
+	out := &stubMessenger{}
+	m := newMorning(stubWellness{days: []icu.Wellness{green("2026-06-10")}}, out, newStubRuns())
+	m.Exercises = exercises.MustLoad()
+	m.Injuries = stubOpenInjuries{open: []store.Injury{{BodyPart: "caviglia", Pain: 2, Status: "open"}}}
+
+	if err := m.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.verdicts[0].Kind == verdict.Skip {
+		t.Fatalf("test precondition: low pain unexpectedly produced SKIP: %+v", out.verdicts[0])
+	}
+	if strings.Contains(out.bodies[0], "Prevenzione") {
+		t.Errorf("generic routine present with an open injury:\n%s", out.bodies[0])
 	}
 }
 

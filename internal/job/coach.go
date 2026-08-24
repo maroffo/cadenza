@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -76,7 +77,7 @@ type MutationProposer interface {
 	Discard(ctx context.Context, id string) error
 }
 
-// CallBudget enforces the daily deep-tier cap (decision 18, mechanical).
+// CallBudget enforces the daily deep-tier API-request cap (decision 18, mechanical).
 type CallBudget interface {
 	Spend(ctx context.Context, date string, limit int) (int, bool, error)
 }
@@ -85,9 +86,11 @@ type CallBudget interface {
 // exactly this count, that the day's deep-tier budget is running low.
 const budgetWarnAt = 30
 
-// maxDeepCallsPerDay bounds worst-case Opus spend regardless of chattiness
-// or redelivery storms.
+// maxDeepCallsPerDay bounds actual Opus Messages.New calls, including every
+// tool-loop continuation, regardless of chattiness or redelivery storms.
 const maxDeepCallsPerDay = 40
+
+var errDeepBudgetExhausted = errors.New("daily deep-tier request budget exhausted")
 
 // ConversationStore extends SessionStore with history loading.
 type ConversationStore interface {
@@ -346,28 +349,7 @@ func (c *Coach) ConverseReply(ctx context.Context, text string) (string, verdict
 // converse runs the shared pipeline. A non-empty degraded string means the
 // model could not answer and the CALLER must deliver it on its own channel.
 func (c *Coach) converse(ctx context.Context, text string) (reply string, v verdict.Verdict, demos []string, degraded string, err error) {
-	// Decision 18, mechanically: when the daily deep-tier budget is spent,
-	// degrade honestly instead of burning Opus on a chatty day or a storm.
-	if c.Budget != nil {
-		today := c.Now().In(c.TZ).Format(dateOnly)
-		spent, ok, err := c.Budget.Spend(ctx, today, maxDeepCallsPerDay)
-		if err != nil {
-			return "", verdict.Verdict{}, nil, "", fmt.Errorf("coach: budget: %w", err)
-		}
-		if !ok {
-			slog.Warn("coach: daily deep-tier budget exhausted", "date", today)
-			return "", verdict.Verdict{}, nil, "⚠️ Budget giornaliero del coach esaurito: riprendiamo domani. " +
-				"Per il quadro di oggi: /status.", nil
-		}
-		if spent == budgetWarnAt {
-			// Equality, not >=: the notice fires exactly once per day.
-			slog.Warn("coach: budget early warning", "spent", spent, "limit", maxDeepCallsPerDay)
-			if err := c.Out.Send(ctx, fmt.Sprintf(
-				"ℹ️ Avviso budget: %d/%d conversazioni profonde usate oggi.", spent, maxDeepCallsPerDay)); err != nil {
-				slog.Warn("coach: budget notice failed", "err", err)
-			}
-		}
-	}
+	beforeCall := c.deepBudgetGate()
 
 	body, v, err := c.Status.Compose(ctx)
 	if err != nil {
@@ -413,12 +395,17 @@ func (c *Coach) converse(ctx context.Context, text string) (reply string, v verd
 		"Contesto deterministico di oggi (gia' calcolato, non contraddirlo):\n%s\n%s%s\n\nMessaggio dell'atleta:\n%s",
 		body, verdict.RenderBlock(v), c.routineContext(ctx, today), text)
 	res, err := c.Agent.Reply(ctx, agent.CoachInput{
-		Profile: prefix, History: history, UserText: userText,
+		Profile: prefix, History: history, UserText: userText, BeforeCall: beforeCall,
 	}, c.tools(sessionID, v, today))
 	if err != nil {
 		slog.Warn("coach: reply failed, degraded", "err", err)
-		return "", verdict.Verdict{}, nil, telegram.DegradedLLMDown() +
-			"\n\nIl quadro deterministico di oggi:\n\n" + body + "\n\n" + verdict.RenderBlock(v), nil
+		fallback := telegram.DegradedLLMDown() +
+			"\n\nIl quadro deterministico di oggi:\n\n" + body + "\n\n" + verdict.RenderBlock(v)
+		if errors.Is(err, errDeepBudgetExhausted) {
+			fallback = "⚠️ Budget giornaliero del coach esaurito: riprendiamo domani. " +
+				"Per il quadro di oggi: /status."
+		}
+		return "", verdict.Verdict{}, nil, appendEffectNotices(fallback, res.Effects), nil
 	}
 
 	// Pull the @demo annotation out of the RAW model text first, then sanitize:
@@ -427,6 +414,58 @@ func (c *Coach) converse(ctx context.Context, text string) (reply string, v verd
 	reply = telegram.SanitizeNarrative(cleaned)
 	c.persist(ctx, sessionID, text, reply)
 	return reply, v, demos, "", nil
+}
+
+// deepBudgetGate charges every Messages.New invocation, including tool-loop
+// continuations and pause_turn resumes. This keeps the cap tied to actual paid
+// requests rather than conversations, which may contain up to ten requests.
+func (c *Coach) deepBudgetGate() func(context.Context) error {
+	if c.Budget == nil {
+		return nil
+	}
+	date := c.Now().In(c.TZ).Format(dateOnly)
+	warned := false
+	return func(ctx context.Context) error {
+		spent, ok, err := c.Budget.Spend(ctx, date, maxDeepCallsPerDay)
+		if err != nil {
+			return fmt.Errorf("coach: budget: %w", err)
+		}
+		if !ok {
+			slog.Warn("coach: daily deep-tier request budget exhausted", "date", date)
+			return errDeepBudgetExhausted
+		}
+		if spent == budgetWarnAt && !warned {
+			warned = true
+			slog.Warn("coach: budget early warning", "spent", spent, "limit", maxDeepCallsPerDay)
+			if c.Out != nil {
+				if err := c.Out.Send(ctx, fmt.Sprintf(
+					"ℹ️ Avviso budget: %d/%d richieste profonde usate oggi.", spent, maxDeepCallsPerDay)); err != nil {
+					slog.Warn("coach: budget notice failed", "err", err)
+				}
+			}
+		}
+		return nil
+	}
+}
+
+func appendEffectNotices(base string, notices []string) string {
+	if len(notices) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(notices))
+	var lines []string
+	for _, notice := range notices {
+		notice = strings.TrimSpace(notice)
+		if notice == "" || seen[notice] {
+			continue
+		}
+		seen[notice] = true
+		lines = append(lines, "• "+telegram.Escape(notice))
+	}
+	if len(lines) == 0 {
+		return base
+	}
+	return base + "\n\n⚠️ <b>Azioni già eseguite prima dell'interruzione:</b>\n" + strings.Join(lines, "\n")
 }
 
 // extractDemos splits a coach reply into the displayable narrative and the list
@@ -683,6 +722,9 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 			Handler: func(ctx context.Context, toolUseID string, input json.RawMessage) (string, error) {
 				return c.propose(ctx, sessionID, toolUseID, input)
 			},
+			EffectNotice: func(string) string {
+				return "La proposta di modifica al profilo e il pulsante di conferma sono già stati inviati."
+			},
 		},
 	}
 	if c.Injuries != nil {
@@ -697,6 +739,9 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 				"required":["body_part","pain"]}`),
 			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
 				return c.logInjury(ctx, today, input)
+			},
+			EffectNotice: func(string) string {
+				return "Il registro infortuni è già stato aggiornato."
 			},
 		}
 	}
@@ -719,6 +764,13 @@ func (c *Coach) tools(sessionID string, v verdict.Verdict, today string) agent.T
 			Schema: json.RawMessage(workout.ToolSchema),
 			Handler: func(ctx context.Context, _ string, input json.RawMessage) (string, error) {
 				return c.writeWorkout(ctx, sessionID, v, today, input)
+			},
+			EffectNotice: func(out string) string {
+				if strings.HasPrefix(out, "Allenamento scritto e VERIFICATO") ||
+					strings.HasPrefix(out, "ATTENZIONE: scrittura NON verificata") {
+					return "Il calendario è già stato aggiornato o richiede verifica: controllalo prima di ripetere la richiesta."
+				}
+				return ""
 			},
 		}
 	}
@@ -980,7 +1032,8 @@ func (c *Coach) scaleRecipe(ctx context.Context, input json.RawMessage) (string,
 		Ricetta    string  `json:"ricetta"`
 		TargetKcal float64 `json:"target_kcal"`
 	}
-	if err := json.Unmarshal(input, &in); err != nil || strings.TrimSpace(in.Ricetta) == "" || in.TargetKcal <= 0 {
+	if err := json.Unmarshal(input, &in); err != nil || strings.TrimSpace(in.Ricetta) == "" ||
+		in.TargetKcal <= 0 || math.IsNaN(in.TargetKcal) || math.IsInf(in.TargetKcal, 0) {
 		return "", fmt.Errorf("servono 'ricetta' e 'target_kcal' > 0")
 	}
 	book, err := c.Recipes.Book(ctx)
@@ -1309,7 +1362,7 @@ func (c *Coach) propose(ctx context.Context, sessionID, toolUseID string, input 
 		// Strict parse + canonical normalization: Sscanf would accept
 		// "3 testo arbitrario" and store the junk verbatim.
 		capVal, err := strconv.ParseFloat(strings.TrimSpace(in.NewValue), 64)
-		if err != nil || capVal <= 0 || capVal > 6 {
+		if err != nil || capVal <= 0 || capVal > 6 || math.IsNaN(capVal) || math.IsInf(capVal, 0) {
 			return "", fmt.Errorf("ramp_cap deve essere un numero in (0, 6], ricevuto %q", in.NewValue)
 		}
 		in.NewValue = fmt.Sprintf("%.1f", capVal)

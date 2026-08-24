@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -461,6 +462,55 @@ func (f fixedBudget) Spend(context.Context, string, int) (int, bool, error) {
 	return f.spent, f.allowed, nil
 }
 
+type sequenceBudget struct {
+	calls      int
+	allowCalls int
+}
+
+func (s *sequenceBudget) Spend(context.Context, string, int) (int, bool, error) {
+	s.calls++
+	return s.calls, s.calls <= s.allowCalls, nil
+}
+
+func TestConverse_BudgetCountsToolLoopRequestsAndStopsIntermediateCall(t *testing.T) {
+	llm := fakes.NewAnthropic(fakes.Call("tu_budget", "get_wellness", `{"days":1}`))
+	defer llm.Close()
+	c, out, _, _, _, _ := newCoach(t, llm)
+	budget := &sequenceBudget{allowCalls: 1}
+	c.Budget = budget
+
+	if err := c.Converse(context.Background(), "come sto?"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if budget.calls != 2 || len(llm.Requests) != 1 {
+		t.Fatalf("budget calls=%d HTTP requests=%d, want 2 charges and 1 admitted request", budget.calls, len(llm.Requests))
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "Budget giornaliero") {
+		t.Fatalf("budget fallback missing: %v", out.plain)
+	}
+}
+
+func TestConverse_EffectNoticeSurvivesLaterModelFailure(t *testing.T) {
+	llm := fakes.NewAnthropic(
+		fakes.Call("tu_effect", "propose_profile_update",
+			`{"kind":"rule","new_value":"Dopo un volo niente qualità","rationale":"r","source_quote":"q"}`),
+		fakes.HTTPErr{Status: 400},
+	)
+	defer llm.Close()
+	c, out, _, _, muts, conf := newCoach(t, llm)
+
+	if err := c.Converse(context.Background(), "ricordalo"); err != nil {
+		t.Fatalf("Converse: %v", err)
+	}
+	if len(muts.ids) != 1 || len(conf.texts) != 1 {
+		t.Fatalf("mutation effect did not happen: muts=%v confirms=%v", muts.ids, conf.texts)
+	}
+	if len(out.plain) != 1 || !strings.Contains(out.plain[0], "Azioni già eseguite") ||
+		!strings.Contains(out.plain[0], "pulsante di conferma") {
+		t.Fatalf("code-owned effect notice missing from fallback: %v", out.plain)
+	}
+}
+
 func TestConverse_RampCapJunkValueRejected(t *testing.T) {
 	llm := fakes.NewAnthropic(
 		fakes.Call("tu_junk", "propose_profile_update",
@@ -475,6 +525,26 @@ func TestConverse_RampCapJunkValueRejected(t *testing.T) {
 	}
 	if len(muts.ids) != 0 || len(conf.texts) != 0 {
 		t.Fatal("junk ramp_cap value accepted (Sscanf-style parsing)")
+	}
+}
+
+func TestConverse_RampCapNonFiniteRejected(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Inf"} {
+		t.Run(value, func(t *testing.T) {
+			llm := fakes.NewAnthropic(
+				fakes.Call("tu_nonfinite", "propose_profile_update",
+					fmt.Sprintf(`{"kind":"ramp_cap","new_value":%q,"rationale":"r","source_quote":"q"}`, value)),
+				fakes.Text{S: "valore rifiutato"},
+			)
+			defer llm.Close()
+			c, _, _, _, muts, conf := newCoach(t, llm)
+			if err := c.Converse(context.Background(), "x"); err != nil {
+				t.Fatalf("Converse: %v", err)
+			}
+			if len(muts.ids) != 0 || len(conf.texts) != 0 {
+				t.Fatalf("non-finite value %q accepted", value)
+			}
+		})
 	}
 }
 

@@ -171,7 +171,7 @@ func equalStrings(a, b []string) bool {
 }
 
 func TestLoad_BadRateRejected(t *testing.T) {
-	for _, raw := range []string{"fast", "0", "-1"} {
+	for _, raw := range []string{"fast", "0", "-1", "NaN", "+Inf", "-Inf"} {
 		t.Run(raw, func(t *testing.T) {
 			_, err := Load(env(map[string]string{"ICU_RATE_PER_SEC": raw}))
 			if err == nil || !strings.Contains(err.Error(), "ICU_RATE_PER_SEC") {

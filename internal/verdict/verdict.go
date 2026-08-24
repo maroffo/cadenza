@@ -3,7 +3,10 @@
 
 package verdict
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 type Kind string
 
@@ -142,16 +145,24 @@ type Check struct {
 // must set BOTH axes (an injury day allows bounded easy movement, never
 // unlimited anything).
 var capsFor = map[string]Caps{
-	"missing_data":        {MaxZone: 2, MaxMinutes: 60},
-	"hrv_low":             {MaxZone: 2, MaxMinutes: 60},
-	"hrv_low_3d":          {MaxZone: 1, MaxMinutes: 30},
-	"resting_hr_elevated": {MaxZone: 2, MaxMinutes: 60},
-	"resting_hr_high":     {MaxZone: 1, MaxMinutes: 30},
-	"short_sleep":         {MaxZone: 2, MaxMinutes: 75},
-	"ramp_over_cap":       {MaxZone: 3, MaxMinutes: 60},
-	"injury_active":       {MaxZone: 1, MaxMinutes: 45},
-	"injury_feel":         {MaxZone: 2, MaxMinutes: 60},
-	"readiness_low":       {MaxZone: 3},
+	"missing_data":                {MaxZone: 2, MaxMinutes: 60},
+	"hrv_low":                     {MaxZone: 2, MaxMinutes: 60},
+	"hrv_low_3d":                  {MaxZone: 1, MaxMinutes: 30},
+	"resting_hr_elevated":         {MaxZone: 2, MaxMinutes: 60},
+	"resting_hr_high":             {MaxZone: 1, MaxMinutes: 30},
+	"short_sleep":                 {MaxZone: 2, MaxMinutes: 75},
+	"ramp_over_cap":               {MaxZone: 3, MaxMinutes: 60},
+	"invalid_ramp_cap":            {MaxZone: 2, MaxMinutes: 45},
+	"injury_active":               {MaxZone: 1, MaxMinutes: 45},
+	"injury_feel":                 {MaxZone: 2, MaxMinutes: 60},
+	"injury_registry_unavailable": {MaxZone: 1, MaxMinutes: 30},
+	"readiness_low":               {MaxZone: 3, MaxMinutes: 60},
+	"readiness_very_low":          {MaxZone: 1, MaxMinutes: 30},
+	"sleep_score_low":             {MaxZone: 2, MaxMinutes: 75},
+	"spo2_low":                    {MaxZone: 2, MaxMinutes: 60},
+	"spo2_very_low":               {MaxZone: 1, MaxMinutes: 30},
+	"soreness_high":               {MaxZone: 2, MaxMinutes: 60},
+	"fatigue_high":                {MaxZone: 2, MaxMinutes: 60},
 }
 
 // skipRules escalate the verdict to SKIP; everything else fired is MODIFY.
@@ -242,7 +253,16 @@ func Compute(in Input, rules Rules) Verdict {
 	// Ramp rate: fires even when every autonomic signal is green. There is
 	// no HRV for tendons (spec, core principle 3).
 	rampCap := in.RampCap
-	if rampCap <= 0 || rampCap > tierARampCap {
+	switch {
+	case math.IsNaN(rampCap) || math.IsInf(rampCap, 0):
+		// A non-finite cap makes every comparison false. Tighten the day even
+		// when today's ramp is absent or negative, then use zero for any
+		// available ramp comparison.
+		v.fire("invalid_ramp_cap",
+			"tetto rampa non valido: protezione conservativa attiva",
+			"valore non finito", "numero finito in (0, 6]")
+		rampCap = 0
+	case rampCap <= 0 || rampCap > tierARampCap:
 		rampCap = tierARampCap
 	}
 	if in.Today.RampRate == nil {
@@ -311,6 +331,9 @@ func Compute(in Input, rules Rules) Verdict {
 
 	if in.DataGapInjuries {
 		v.DataGaps = append(v.DataGaps, "registro infortuni non disponibile")
+		v.fire("injury_registry_unavailable",
+			"registro infortuni non disponibile: protezione conservativa attiva",
+			"lettura non riuscita", "registro disponibile")
 	}
 	// Injuries.
 	for _, inj := range in.Injuries {
@@ -343,7 +366,17 @@ func (v *Verdict) fire(ruleID, message, observed, threshold string) {
 	} else if v.Kind != Skip {
 		v.Kind = Modify
 	}
-	v.Caps = tighten(v.Caps, capsFor[ruleID])
+	caps, ok := capsFor[ruleID]
+	if !ok {
+		// A newly added rule must fail closed even if its author forgets the
+		// explicit map entry. Tests still require every known rule to declare
+		// deliberate caps, while this fallback protects production rollouts.
+		caps = Caps{MaxZone: 2, MaxMinutes: 60}
+		if skipRules[ruleID] {
+			caps = Caps{MaxZone: 1, MaxMinutes: 30}
+		}
+	}
+	v.Caps = tighten(v.Caps, caps)
 }
 
 // tighten merges caps keeping the most restrictive non-zero values.

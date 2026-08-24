@@ -28,8 +28,9 @@ func NewRuns(client *firestore.Client) *Runs {
 }
 
 type runDoc struct {
-	Status    string    `firestore:"status"`
-	UpdatedAt time.Time `firestore:"updated_at"`
+	Status        string    `firestore:"status"`
+	UpdatedAt     time.Time `firestore:"updated_at"`
+	DeferredUntil time.Time `firestore:"deferred_until,omitempty"`
 }
 
 func morningDocID(date string) string { return "morning-" + date }
@@ -58,26 +59,33 @@ func (r *Runs) MorningCompleted(ctx context.Context, date string) (bool, error) 
 	return !strings.HasPrefix(doc.Status, deferredPrefix), nil
 }
 
-// MorningAlive is true when any state exists, deferred included: the
-// watchdog must stay quiet while a retry is in flight (the terminal attempt
-// always sends, so a deferral is never a silent morning).
-func (r *Runs) MorningAlive(ctx context.Context, date string) (bool, error) {
+// MorningAlive is true for a completed run or an unexpired deferral. A stale
+// deferral must not keep the watchdog quiet after its named retry went missing.
+func (r *Runs) MorningAlive(ctx context.Context, date string, now time.Time) (bool, error) {
 	doc, err := r.get(ctx, date)
-	return doc != nil, err
+	if err != nil || doc == nil {
+		return false, err
+	}
+	if !strings.HasPrefix(doc.Status, deferredPrefix) {
+		return true, nil
+	}
+	return !doc.DeferredUntil.IsZero() && now.Before(doc.DeferredUntil), nil
 }
 
 func (r *Runs) MarkMorningCompleted(ctx context.Context, date, jobStatus string) error {
-	return r.set(ctx, date, jobStatus)
+	return r.set(ctx, date, jobStatus, time.Time{})
 }
 
-func (r *Runs) MarkMorningDeferred(ctx context.Context, date string, attempt int) error {
-	return r.set(ctx, date, fmt.Sprintf("%s%d", deferredPrefix, attempt))
+func (r *Runs) MarkMorningDeferred(ctx context.Context, date string, attempt int, until time.Time) error {
+	if until.IsZero() {
+		return fmt.Errorf("runs set: deferred deadline is required")
+	}
+	return r.set(ctx, date, fmt.Sprintf("%s%d", deferredPrefix, attempt), until.UTC())
 }
 
-func (r *Runs) set(ctx context.Context, date, jobStatus string) error {
+func (r *Runs) set(ctx context.Context, date, jobStatus string, deferredUntil time.Time) error {
 	_, err := r.client.Collection(runsCollection).Doc(morningDocID(date)).Set(ctx, runDoc{
-		Status:    jobStatus,
-		UpdatedAt: time.Now().UTC(),
+		Status: jobStatus, UpdatedAt: time.Now().UTC(), DeferredUntil: deferredUntil,
 	})
 	if err != nil {
 		return fmt.Errorf("runs set: %w", err)

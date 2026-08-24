@@ -6,6 +6,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"cloud.google.com/go/firestore"
 
@@ -45,8 +46,12 @@ func (p *Profiles) Profile(ctx context.Context) (verdict.Baselines, float64, err
 	if err := snap.DataTo(&doc); err != nil {
 		return verdict.Baselines{}, 0, fmt.Errorf("profile/current decode: %w", err)
 	}
-	if doc.Baselines.HRVMean <= 0 || doc.Baselines.HRVSD <= 0 {
+	if !positiveFinite(doc.Baselines.HRVMean) || !positiveFinite(doc.Baselines.HRVSD) ||
+		!positiveFinite(doc.Baselines.RestingHR) {
 		return verdict.Baselines{}, 0, fmt.Errorf("profile/current: implausible baselines %+v", doc.Baselines)
+	}
+	if !validRampCap(doc.RampCap) {
+		return verdict.Baselines{}, 0, fmt.Errorf("profile/current: ramp_cap %v fuori da (0, 6]", doc.RampCap)
 	}
 	return verdict.Baselines{
 		HRVMean:   doc.Baselines.HRVMean,
@@ -58,6 +63,13 @@ func (p *Profiles) Profile(ctx context.Context) (verdict.Baselines, float64, err
 // Seed writes profile/current. Used by cmd/seed; overwrites are deliberate
 // there (the seeder is the only writer until M5 mutations land).
 func (p *Profiles) Seed(ctx context.Context, baselines verdict.Baselines, rampCap float64) error {
+	if !positiveFinite(baselines.HRVMean) || !positiveFinite(baselines.HRVSD) ||
+		!positiveFinite(baselines.RestingHR) {
+		return fmt.Errorf("profile seed: implausible baselines %+v", baselines)
+	}
+	if !validRampCap(rampCap) {
+		return fmt.Errorf("profile seed: ramp_cap %v fuori da (0, 6]", rampCap)
+	}
 	var doc profileDoc
 	doc.Baselines.HRVMean = baselines.HRVMean
 	doc.Baselines.HRVSD = baselines.HRVSD
@@ -70,7 +82,7 @@ func (p *Profiles) Seed(ctx context.Context, baselines verdict.Baselines, rampCa
 // SetRampCap tightens/sets the materialized ramp cap (dashboard action).
 // The (0, 6] Tier A bound is enforced by the caller AND here.
 func (p *Profiles) SetRampCap(ctx context.Context, cap float64) error {
-	if cap <= 0 || cap > 6 {
+	if !validRampCap(cap) {
 		return fmt.Errorf("ramp_cap %v fuori da (0, 6]", cap)
 	}
 	_, err := p.client.Collection(profileCollection).Doc(profileDocID).Set(ctx, map[string]any{
@@ -80,4 +92,12 @@ func (p *Profiles) SetRampCap(ctx context.Context, cap float64) error {
 		return fmt.Errorf("profile ramp cap: %w", err)
 	}
 	return nil
+}
+
+func positiveFinite(v float64) bool {
+	return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func validRampCap(v float64) bool {
+	return positiveFinite(v) && v <= 6
 }

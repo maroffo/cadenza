@@ -7,12 +7,34 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/maroffo/cadenza/internal/verdict"
 )
+
+func TestProfiles_WriteBoundariesRejectNonFiniteWithoutNetwork(t *testing.T) {
+	p := NewProfiles(nil)
+	for name, value := range map[string]float64{"nan": math.NaN(), "pos_inf": math.Inf(1), "neg_inf": math.Inf(-1)} {
+		t.Run(name, func(t *testing.T) {
+			if err := p.SetRampCap(context.Background(), value); err == nil {
+				t.Fatalf("SetRampCap(%v) accepted", value)
+			}
+			if err := p.Seed(context.Background(), verdict.Baselines{
+				HRVMean: 68, HRVSD: 6, RestingHR: 47,
+			}, value); err == nil {
+				t.Fatalf("Seed ramp cap %v accepted", value)
+			}
+			if err := p.Seed(context.Background(), verdict.Baselines{
+				HRVMean: value, HRVSD: 6, RestingHR: 47,
+			}, 4); err == nil {
+				t.Fatalf("Seed baseline %v accepted", value)
+			}
+		})
+	}
+}
 
 func TestProfiles_SeedAndGetRoundTrip(t *testing.T) {
 	client := emulatorClient(t)
@@ -42,8 +64,15 @@ func TestProfiles_ImplausibleBaselinesRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := p.Seed(ctx, verdict.Baselines{}, 4.0); err != nil {
-		t.Fatalf("Seed: %v", err)
+	if err := p.Seed(ctx, verdict.Baselines{}, 4.0); err == nil {
+		t.Fatal("Seed accepted zero baselines")
+	}
+	// Simulate a legacy/corrupt document that predates write-boundary checks:
+	// the read boundary must independently remain fail-closed.
+	var corrupt profileDoc
+	corrupt.RampCap = 4
+	if _, err := client.Collection(profileCollection).Doc(profileDocID).Set(ctx, corrupt); err != nil {
+		t.Fatalf("write corrupt fixture: %v", err)
 	}
 	if _, _, err := p.Profile(ctx); err == nil {
 		t.Fatal("zero baselines accepted; coaching on invented numbers must fail loudly")
@@ -120,16 +149,21 @@ func TestRuns_DeferredLifecycle(t *testing.T) {
 	defer cancel()
 	date := fmt.Sprintf("2099-defer-%d", time.Now().UnixNano())
 
-	if err := r.MarkMorningDeferred(ctx, date, 1); err != nil {
+	now := time.Now().UTC()
+	if err := r.MarkMorningDeferred(ctx, date, 1, now.Add(time.Minute)); err != nil {
 		t.Fatalf("MarkMorningDeferred: %v", err)
 	}
 	done, err := r.MorningCompleted(ctx, date)
 	if err != nil || done {
 		t.Fatalf("deferred reports completed=%v err=%v, want false", done, err)
 	}
-	alive, err := r.MorningAlive(ctx, date)
+	alive, err := r.MorningAlive(ctx, date, now)
 	if err != nil || !alive {
 		t.Fatalf("deferred reports alive=%v err=%v, want true (watchdog quiet)", alive, err)
+	}
+	alive, err = r.MorningAlive(ctx, date, now.Add(2*time.Minute))
+	if err != nil || alive {
+		t.Fatalf("stale deferred reports alive=%v err=%v, want false", alive, err)
 	}
 
 	if err := r.MarkMorningCompleted(ctx, date, "GO"); err != nil {
@@ -510,6 +544,20 @@ func TestInjuries_Lifecycle(t *testing.T) {
 	}
 	if reopened.Status != "open" || reopened.Rev != 3 || reopened.Pain != 5 {
 		t.Fatalf("reopen = %+v, want open rev3 pain5", reopened)
+	}
+
+	// A "worse" tap tightens the numeric signal consumed by the verdict,
+	// even when the original report was below its active-injury threshold.
+	lowID := InjuryID(fmt.Sprintf("2098-%d", time.Now().UnixNano()), "caviglia")
+	if _, err := inj.Open(ctx, lowID, Injury{BodyPart: "caviglia", Pain: 1}); err != nil {
+		t.Fatalf("open low pain: %v", err)
+	}
+	if err := inj.RecordFeedback(ctx, lowID, "worse"); err != nil {
+		t.Fatalf("worse feedback: %v", err)
+	}
+	worse, err := inj.Get(ctx, lowID)
+	if err != nil || worse.Pain < worsePainFloor || worse.LastFeedback != "worse" {
+		t.Fatalf("worse feedback did not tighten deterministic pain: %+v, %v", worse, err)
 	}
 
 	// Ghost operations are named, not silently confirmed.

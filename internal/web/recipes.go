@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -225,7 +226,7 @@ func parseRecipeForm(r *http.Request) (recipes.Recipe, string, []string) {
 	}
 
 	porzioni := strings.TrimSpace(r.FormValue("porzioni"))
-	if p, err := strconv.ParseFloat(porzioni, 64); err != nil || p <= 0 {
+	if p, err := strconv.ParseFloat(porzioni, 64); err != nil || p <= 0 || math.IsNaN(p) || math.IsInf(p, 0) {
 		errs = append(errs, "porzioni deve essere un numero maggiore di 0")
 	} else {
 		rec.Porzioni = p
@@ -268,13 +269,13 @@ func parseIngredients(raw string) ([]recipes.Ingredient, []string) {
 		}
 		food := strings.TrimSpace(parts[0])
 		qta, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("riga %d: quantità non valida %q", i+1, strings.TrimSpace(parts[1])))
-			continue
-		}
 		unita := "g"
 		if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
 			unita = strings.TrimSpace(parts[2])
+		}
+		if err != nil || math.IsNaN(qta) || math.IsInf(qta, 0) || qta < 0 || (qta == 0 && unita != "qb") {
+			errs = append(errs, fmt.Sprintf("riga %d: quantità deve essere positiva e finita (0 solo per q.b.)", i+1))
+			continue
 		}
 		out = append(out, recipes.Ingredient{Food: food, Qta: qta, Unita: unita})
 	}

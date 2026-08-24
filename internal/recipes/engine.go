@@ -128,9 +128,10 @@ func buildBook(misure map[string]Measure, rs []Recipe, ms []Meal, cat *foods.Cat
 	var problems []string
 	validRecipes := make([]Recipe, 0, len(rs))
 	recipesByID := make(map[string]Recipe, len(rs))
+	validator := &Book{misure: misure, cat: cat}
 	for _, r := range rs {
-		if bad := recipeUnresolved(cat, r); len(bad) > 0 {
-			problems = append(problems, fmt.Sprintf("ricetta %q: alimento sconosciuto %s", r.ID, strings.Join(bad, ", ")))
+		if bad := validator.ValidateRecipe(r); len(bad) > 0 {
+			problems = append(problems, fmt.Sprintf("ricetta %q: %s", r.ID, strings.Join(bad, ", ")))
 			continue
 		}
 		validRecipes = append(validRecipes, r)
@@ -238,6 +239,9 @@ func (b *Book) grams(ing Ingredient) (float64, error) {
 	unit := ing.Unita
 	if unit == "" {
 		unit = "g"
+	}
+	if math.IsNaN(ing.Qta) || math.IsInf(ing.Qta, 0) || ing.Qta < 0 || (ing.Qta == 0 && unit != "qb") {
+		return 0, fmt.Errorf("recipes: %q: quantity must be positive and finite (zero only for qb)", ing.Food)
 	}
 	switch unit {
 	case "g", "ml":
@@ -354,6 +358,9 @@ func (b *Book) MealTotals(m Meal) (foods.Macros, []string, []string) {
 // so the dashboard can never persist a recipe whose lactose tag we'd miss).
 func (b *Book) ValidateRecipe(r Recipe) []string {
 	var problems []string
+	if r.Porzioni <= 0 || math.IsNaN(r.Porzioni) || math.IsInf(r.Porzioni, 0) {
+		problems = append(problems, "porzioni deve essere positiva e finita")
+	}
 	if len(r.Ingredienti) == 0 {
 		problems = append(problems, "la ricetta non ha ingredienti")
 	}
@@ -557,7 +564,7 @@ func excludes(allergens []string, exclude map[string]bool) bool {
 
 // servings returns a safe divisor: porzioni clamped to a minimum of 1.
 func servings(porzioni float64) float64 {
-	if porzioni < 1 {
+	if porzioni < 1 || math.IsNaN(porzioni) || math.IsInf(porzioni, 0) {
 		return 1
 	}
 	return porzioni

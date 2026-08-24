@@ -75,6 +75,9 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	if res.Text != "ieri hai corso facile, bene." {
 		t.Errorf("out = %q", res.Text)
 	}
+	if res.Usage.InputTokens != 200 || res.Usage.OutputTokens != 100 {
+		t.Errorf("cumulative usage = %+v, want 200 input / 100 output", res.Usage)
+	}
 	// Second request must carry the tool_result for tu_1: a missing
 	// tool_result for any tool_use id makes the real API reject the call.
 	if len(fake.Requests) != 2 {
@@ -83,6 +86,82 @@ func TestRun_ToolCallAnsweredThenCompletes(t *testing.T) {
 	second, _ := json.Marshal(fake.Requests[1].Messages)
 	if !strings.Contains(string(second), "tool_result") || !strings.Contains(string(second), "tu_1") {
 		t.Errorf("second request missing tool_result for tu_1:\n%s", second)
+	}
+}
+
+func TestRun_BeforeCallRunsForEveryModelRequest(t *testing.T) {
+	fake := fakes.NewAnthropic(
+		fakes.Call("tu_budget", "mutate", `{}`),
+		fakes.Text{S: "done"},
+	)
+	defer fake.Close()
+	calls := 0
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+		BeforeCall: func(context.Context) error { calls++; return nil },
+	}, Tools{"mutate": {
+		Description: "mutates", Schema: json.RawMessage(`{"type":"object"}`),
+		Handler: func(context.Context, string, json.RawMessage) (string, error) { return "ok", nil },
+	}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if calls != 2 || len(fake.Requests) != 2 {
+		t.Fatalf("budget calls=%d HTTP calls=%d, want 2/2", calls, len(fake.Requests))
+	}
+	if res.Usage.InputTokens != 200 || res.Usage.OutputTokens != 100 {
+		t.Fatalf("usage = %+v, want cumulative", res.Usage)
+	}
+}
+
+func TestRun_IntermediateBudgetFailureReturnsEffectJournal(t *testing.T) {
+	fake := fakes.NewAnthropic(fakes.Call("tu_effect", "mutate", `{}`))
+	defer fake.Close()
+	exhausted := errors.New("budget exhausted")
+	calls := 0
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+		BeforeCall: func(context.Context) error {
+			calls++
+			if calls == 2 {
+				return exhausted
+			}
+			return nil
+		},
+	}, Tools{"mutate": {
+		Description: "mutates", Schema: json.RawMessage(`{"type":"object"}`),
+		Handler:      func(context.Context, string, json.RawMessage) (string, error) { return "arbitrary tool output", nil },
+		EffectNotice: func(string) string { return "code-owned effect happened" },
+	}})
+	if !errors.Is(err, exhausted) {
+		t.Fatalf("err = %v, want budget exhaustion", err)
+	}
+	if len(fake.Requests) != 1 {
+		t.Fatalf("requests = %d, second request must be stopped before HTTP", len(fake.Requests))
+	}
+	if len(res.Effects) != 1 || res.Effects[0] != "code-owned effect happened" {
+		t.Fatalf("effects = %v", res.Effects)
+	}
+	if strings.Contains(strings.Join(res.Effects, " "), "arbitrary tool output") {
+		t.Fatal("effect journal exposed arbitrary tool output")
+	}
+}
+
+func TestRun_APIErrorAfterMutationReturnsEffectJournal(t *testing.T) {
+	fake := fakes.NewAnthropic(
+		fakes.Call("tu_effect", "mutate", `{}`),
+		fakes.HTTPErr{Status: 400},
+	)
+	defer fake.Close()
+	res, err := Run(context.Background(), newTestClient(fake.URL()), Request{
+		Model: "m", System: "s", UserText: "u", MaxTokens: 128,
+	}, Tools{"mutate": {
+		Description: "mutates", Schema: json.RawMessage(`{"type":"object"}`),
+		Handler:      func(context.Context, string, json.RawMessage) (string, error) { return "done", nil },
+		EffectNotice: func(string) string { return "mutation already happened" },
+	}})
+	if err == nil || len(res.Effects) != 1 || res.Effects[0] != "mutation already happened" {
+		t.Fatalf("res=%+v err=%v", res, err)
 	}
 }
 
