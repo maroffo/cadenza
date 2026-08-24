@@ -14,6 +14,7 @@ TZ_CRON="${TZ_CRON:-Europe/Rome}"
 # quoting even within double quotes, and the script dies at EOF.
 ALERT_EMAIL="${ALERT_EMAIL:?set ALERT_EMAIL for the deadman switch alert channel}"
 GITHUB_REPO="${GITHUB_REPO:-maroffo/cadenza}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 RUN_SA="cadenza-run@${PROJECT}.iam.gserviceaccount.com"
 INVOKER_SA="cadenza-invoker@${PROJECT}.iam.gserviceaccount.com"
@@ -43,6 +44,7 @@ done
 say "IAM bindings"
 gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${RUN_SA}" --role=roles/datastore.user --condition=None >/dev/null
 gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${RUN_SA}" --role=roles/cloudtasks.enqueuer --condition=None >/dev/null
+gcloud projects add-iam-policy-binding "$PROJECT" --member="serviceAccount:${DEPLOY_SA}" --role=roles/datastore.indexAdmin --condition=None >/dev/null
 # Run SA must mint OIDC tokens as the invoker SA when enqueueing tasks (M3+).
 gcloud iam service-accounts add-iam-policy-binding "$INVOKER_SA" \
   --member="serviceAccount:${RUN_SA}" --role=roles/iam.serviceAccountUser >/dev/null
@@ -52,27 +54,13 @@ say "Firestore (Native, ${REGION})"
 if ! gcloud firestore databases describe --database="(default)" >/dev/null 2>&1; then
   gcloud firestore databases create --location="$REGION" --type=firestore-native
 fi
-say "Firestore TTL policies (dedup 7d-style cleanup, session turns 18m retention)"
-gcloud firestore fields ttls update expires_at \
-  --collection-group=dedup --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=turns --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=profile_events --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=events_written --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=injuries --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=log --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=web_nonces --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=web_sessions --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=checkins --enable-ttl --async || true
-gcloud firestore fields ttls update expires_at \
-  --collection-group=debriefs --enable-ttl --async || true
+say "Firestore TTL policies (fail closed; wait for each control-plane update)"
+for GROUP in dedup turns profile_events events_written injuries log web_nonces web_sessions checkins debriefs; do
+  gcloud firestore fields ttls update expires_at \
+    --collection-group="$GROUP" --enable-ttl --quiet
+done
+say "Firestore composite indexes from firestore.indexes.json"
+python3 "${SCRIPT_DIR}/apply_firestore_indexes.py" --project "$PROJECT"
 
 # ---- Artifact Registry ---------------------------------------------------------
 say "Artifact Registry"
@@ -97,7 +85,7 @@ if ! gcloud tasks queues describe "$QUEUE" --location="$REGION" >/dev/null 2>&1;
 fi
 gcloud tasks queues update "$QUEUE" --location="$REGION" \
   --max-concurrent-dispatches=1 --max-dispatches-per-second=1 \
-  --max-attempts=5 --min-backoff=10s --max-backoff=300s >/dev/null
+  --max-attempts=10 --min-backoff=10s --max-backoff=300s >/dev/null
 
 # ---- First deploy must exist before Scheduler (needs the URL) ------------------
 say "Cloud Run service check"
@@ -107,7 +95,7 @@ Cloud Run service not deployed yet. Deploy first (CI or manually):
   gcloud run deploy cadenza --region=$REGION \
     --image=$REGION-docker.pkg.dev/$PROJECT/cadenza/cadenza:latest \
     --service-account=cadenza-run@$PROJECT.iam.gserviceaccount.com \
-    --allow-unauthenticated --min-instances=0 --max-instances=1 \
+    --min-instances=0 --max-instances=1 --concurrency=1 \
     --timeout=600 --memory=512Mi --cpu-boost \
     --set-env-vars=ENV=prod,GCP_PROJECT=$PROJECT,... \
     --set-secrets=TELEGRAM_BOT_TOKEN=cadenza-telegram-bot-token:1,ICU_API_KEY=cadenza-icu-api-key:1
@@ -150,10 +138,13 @@ create_job() {
   fi
 }
 # IDs are derived server-side from the date; static bodies are fine.
-create_job cadenza-morning   "0 9 * * *"  '{"v":1,"type":"morning_check","id":"morning-scheduler"}'
-create_job cadenza-watchdog  "15 9 * * *" '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
-create_job cadenza-reconcile "0 12 * * *" '{"v":1,"type":"daily_reconcile","id":"reconcile-scheduler"}'
-create_job cadenza-debrief   "30 19 * * *" '{"v":1,"type":"daily_debrief","id":"debrief-scheduler"}'
+create_job cadenza-morning        "0 9 * * *"   '{"v":1,"type":"morning_check","id":"morning-scheduler"}'
+create_job cadenza-watchdog       "15 9 * * *"  '{"v":1,"type":"watchdog","id":"watchdog-scheduler"}'
+# HRV retries can legitimately run at 09:45 and 10:30. A second dead-man
+# check after that chain catches a task accepted by Cloud Tasks but never run.
+create_job cadenza-watchdog-final "45 10 * * *" '{"v":1,"type":"watchdog","id":"watchdog-final-scheduler"}'
+create_job cadenza-reconcile      "0 12 * * *"  '{"v":1,"type":"daily_reconcile","id":"reconcile-scheduler"}'
+create_job cadenza-debrief        "30 19 * * *" '{"v":1,"type":"daily_debrief","id":"debrief-scheduler"}'
 
 # --- Firestore backup (M9.2): daily export to GCS, 90-day lifecycle -------
 BACKUP_BUCKET="gs://cadenza-backups-${PROJECT}"

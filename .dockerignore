@@ -6,7 +6,11 @@
 .env.*
 *.local.json
 service-account*.json
+athlete.yaml
+family.yaml
+.claude/settings.local.json
 quality_reports/
+.pi-subagents/
 .continue-here.md
 .DS_Store
 .idea/

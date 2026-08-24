@@ -15,9 +15,13 @@ coverage.*
 *.local.json
 service-account*.json
 athlete.yaml
+family.yaml
+.claude/settings.local.json
 
 # Harness local artifacts
 .continue-here.md
+.pi-loop.json.lock
+.pi-subagents/
 quality_reports/traces/
 
 # OS / editor
